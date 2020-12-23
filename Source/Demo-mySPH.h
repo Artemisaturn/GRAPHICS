@@ -82,7 +82,7 @@ public:
 			fp0.temperature = fp0.temperatureNext = 0 + m_TH.Kelvin;
 			fp0.beta = -0.01 * (fp0.temperature - m_TH.Kelvin) + 1;
 			fp0.density = 1000 * fp0.beta;
-			fp0.d = m_TH.spacing_r * 1;
+			fp0.d = m_TH.spacing_r * 2;
 			//addFluidCuboid(true, 0, relativeDis + vec_t(-1.5f + m_TH.spacing_r * 2, -2.5f + m_TH.spacing_r * 2, -1.5f + m_TH.spacing_r * 2),
 			//	relativeDis + vec_t(1.5f - m_TH.spacing_r * 2, -1.0f - m_TH.spacing_r * 2, 1.5f - m_TH.spacing_r * 2), fp0, 1000, 0.05f, 1);
 			//addFluidCuboid(true, 0, vec_t(-4.0f + m_TH.spacing_r * 2, -3.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),

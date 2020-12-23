@@ -94,12 +94,14 @@ public:
     real_t DFkappaV;
     real_t DFdivergenceDeviation;
 
+    real_t gamma;
     real_t VFvolume;
     real_t VFvolume_adv;
     real_t VFalpha;
     vec_t VFalpha1;
     real_t VFalpha2;
     real_t VFalpha3;
+    real_t VFalpha4;
     real_t VFkappa;
     real_t VFkappaV;
     real_t VFdivergenceDeviation;
