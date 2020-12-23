@@ -37,7 +37,7 @@ public:
 			m_TH.Kelvin = 273.15;
 			m_TH.spacing_r = 0.15;
 			m_TH.smoothRadius_h = 4 * m_TH.spacing_r;
-			m_TH.dt = real_t(1.0) * m_TH.spacing_r / m_TH.soundSpeed_cs;
+			m_TH.dt = real_t(1.0) * m_TH.spacing_r / m_TH.soundSpeed_cs * 6;
 			m_TH.h = m_TH.smoothRadius_h;
 			m_TH.r = 0.2f;
 			m_TH.bt = 1.0f;
@@ -119,7 +119,7 @@ protected:
 	virtual void stepEvent()
 	{
 		// Ìí¼ÓÍÃ×Ó
-		if (getSystemTime() > 1.0f && isHave) {
+		/*if (getSystemTime() > 1.0f && isHave) {
 			cout << "Time is :" << getSystemTime() << endl;
 
 			const real_t vis = 0.05f;
@@ -131,7 +131,7 @@ protected:
 
 			addIceFromPLY("bunny.ply", "bunny-sample.ply", 0, cp0, vis, glm::scale(glm::vec3(0.0f)), cp0Density, vec_t(0, 10, 0), true);
 			isHave = false;
-		}
+		}*/
 
 	}
 

@@ -347,6 +347,7 @@ int main(int argc, char** argv)
 	glutSolidSphere(0.3 / 2, 10, 10);
 	glEndList();
 
+
 	glStaff::renderLoop(draw);
 
 	return 0;
