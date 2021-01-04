@@ -80,28 +80,28 @@ void colorFunc(float reColor[4], const mySPH::FluidPart& p) {
 }
 
 void colorFunc_b(float reColor[4], const mySPH::BoundPart& p) {
-	/*static const float r=sphDemo.getSpacing_r(), v_max = r*r*r * 1.8f, v_min = r*r*r * 1.0f;
+	static const float r=p.d, v_max = r*r*r * 1.8f, v_min = r*r*r * 1.0f;
 	reColor[3] = 1; reColor[0]=reColor[1]=reColor[2]
-		= std::max(0.0f, std::min(1.0f, 1-(p.volume-v_min)/(v_max-v_min)) );*/
+		= std::max(0.0f, std::min(1.0f, 1-(p.volume-v_min)/(v_max-v_min)) );
 
-	reColor[3] = reColor[2] = reColor[1] = reColor[0] = 0;
-	reColor[3] = 1;
-	if (p.temperature > (273.15 + phase1) && p.temperature < (273.15 + phase2))
-		reColor[2] = (p.temperature - (273.15 + phase1)) / -phase1;
-	else if (p.temperature > (273.15 + phase2) && p.temperature < (273.15 + phase3)) {
-		reColor[2] = 1 - (p.temperature - (273.15 + phase2)) / (phase3 - phase2) / 2;
-		reColor[1] = (p.temperature - (273.15 + phase2)) / (phase3 - phase2);
-	}
-	else if (p.temperature > (273.15 + phase3) && p.temperature < (273.15 + phase4)) {
-		reColor[2] = 0.5 - (p.temperature - (273.15 + phase3)) / (phase4 - phase3) / 2;
-		reColor[1] = 1 - (p.temperature - (273.15 + phase3)) / (phase4 - phase3) / 2;
-		reColor[0] = (p.temperature - 293.15) / (phase4 - phase3);
-	}
-	else {
-		reColor[0] = 1;
-		reColor[1] = 1;
-		reColor[2] = 1;
-	}
+	//reColor[3] = reColor[2] = reColor[1] = reColor[0] = 0;
+	//reColor[3] = 1;
+	//if (p.temperature > (273.15 + phase1) && p.temperature < (273.15 + phase2))
+	//	reColor[2] = (p.temperature - (273.15 + phase1)) / -phase1;
+	//else if (p.temperature > (273.15 + phase2) && p.temperature < (273.15 + phase3)) {
+	//	reColor[2] = 1 - (p.temperature - (273.15 + phase2)) / (phase3 - phase2) / 2;
+	//	reColor[1] = (p.temperature - (273.15 + phase2)) / (phase3 - phase2);
+	//}
+	//else if (p.temperature > (273.15 + phase3) && p.temperature < (273.15 + phase4)) {
+	//	reColor[2] = 0.5 - (p.temperature - (273.15 + phase3)) / (phase4 - phase3) / 2;
+	//	reColor[1] = 1 - (p.temperature - (273.15 + phase3)) / (phase4 - phase3) / 2;
+	//	reColor[0] = (p.temperature - 293.15) / (phase4 - phase3);
+	//}
+	//else {
+	//	reColor[0] = 1;
+	//	reColor[1] = 1;
+	//	reColor[2] = 1;
+	//}
 }
 
 //see 9
@@ -191,7 +191,7 @@ void run_and_draw()
 		else {
 			for (size_t i = 0; i < sphDemo.getNumSolids(); ++i)
 				sphDemo.setBoundPartsColor(int(i), colorFunc_b);
-			sphDemo.oglDrawBounParts(draw_unitsphere2);
+			sphDemo.oglDrawBounParts(draw_unitsphere1);
 		}
 	}
 

@@ -768,7 +768,7 @@ void SphBase::prepareSolidPartWeight()
     neighbourSearch(false,true,false,true);//see 11
 
     // ----------------- need not be parallel ----------------
-    real_t w0 = ker_W(0);
+    //real_t w0 = ker_W(0);
     // forearch solid
     for(size_t n_r=m_Solids.size(),k=0; k<n_r; ++k){
         std::vector<BoundPart>& s_parts = m_Solids[k].boundaryParticles;
@@ -777,19 +777,30 @@ void SphBase::prepareSolidPartWeight()
         // forearch particle
         for(size_t num=s_parts.size(),i=0; i<num; ++i){
             BoundPart& p_a = s_parts[i];
+			real_t h = p_a.d;
+			real_t w0 = ker_W(0, h);
 			const Neigb* neigbs = r_neigbs[i].neigs; int n=r_neigbs[i].num;
 			if(isrigidtype){
 				real_t sum = w0, sum2 = w0;
 				for(int j=0; j<n; ++j){
-					if(neigbs[j].pidx.toSolidI()==k) sum += ker_W(neigbs[j].dis);
-					if(!neigbs[j].pidx.isFluid()) sum2 += ker_W(neigbs[j].dis);
+					if (neigbs[j].pidx.toSolidI() == k) {
+						h = (p_a.d + getDOfPIdx(neigbs[j].pidx)) / 2;
+						sum += ker_W(neigbs[j].dis, h);
+					}	
+					if (!neigbs[j].pidx.isFluid()) {
+						h = (p_a.d + getDOfPIdx(neigbs[j].pidx)) / 2;
+						sum2 += ker_W(neigbs[j].dis, h);
+					}
 				}
 				p_a.kerSumFromSelf = sum;
 				p_a.volume = 1/sum2;
 			}else{
 				real_t sum2 = w0;
 				for(int j=0; j<n; ++j){
-					if(!neigbs[j].pidx.isFluid()) sum2 += ker_W(neigbs[j].dis);
+					if (!neigbs[j].pidx.isFluid()) {
+						h = (p_a.d + getDOfPIdx(neigbs[j].pidx)) / 2;
+						sum2 += ker_W(neigbs[j].dis, h);
+					}
 				}
 				p_a.kerSumFromSelf = w0;
 				p_a.volume = 1/sum2;
@@ -814,10 +825,14 @@ void SphBase::updateSolidPartWeight()
     #pragma omp parallel for
         for(int i=0; i<num; ++i){
             BoundPart& p_a = s_parts[i];
+			real_t h = p_a.d;
             const Neigb* neigbs = r_neigbs[i].neigs; int n=r_neigbs[i].num;
             real_t volume = p_a.kerSumFromSelf;
             for(int j=0; j<n; ++j){
-				if(!neigbs[j].pidx.isFluid()) volume += ker_W(neigbs[j].dis);
+				if (!neigbs[j].pidx.isFluid()) {
+					h = (p_a.d + getDOfPIdx(neigbs[j].pidx)) / 2;
+					volume += ker_W(neigbs[j].dis, h);
+				}
             }
             p_a.volume = 1/volume;
         }
@@ -835,13 +850,13 @@ void SphBase::neighbourSearch(
     bool fluidPart, bool solidPart, bool candidatePart, bool RR_same)
 {
 	// update internal numbers used to calculate kernel
-	ker_update_numbers();
+	//ker_update_numbers();
 
     // insert particles into the grid
     gridSetup();
 
     int_t n_off = mg_NS.offset.size();
-    real_t h2 = m_TH.smoothRadius_h*m_TH.smoothRadius_h;
+    //real_t h2 = m_TH.smoothRadius_h*m_TH.smoothRadius_h;
     // foreach fluid
     if(fluidPart) for(int n_f=int(m_Fluids.size()),k=0; k<n_f; ++k){
         const std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
@@ -865,6 +880,8 @@ void SphBase::neighbourSearch(
 						if( i==j ) continue;
 						const vec_t& pos_b = getPosOfPIdx(j);
 						//real_t len2 = (pos_a-pos_b).len_square();
+						real_t h = getDOfPIdx(j) + f_parts[ii].d;
+						real_t h2 = pow(h, 2);
 						real_t len2 = pos_a.dis_square(pos_b);
 						if(len2<h2) neigbs.pushBack(j, std::sqrt(len2), m_EC.tooManyNeigb);
 					}
@@ -897,12 +914,15 @@ void SphBase::neighbourSearch(
         for(int ii=0; ii<num; ++ii){
             NeigbStr& neigbs=r_neigbs[ii]; neigbs.clear();
             const vec_t& pos_a = s_parts[ii].position;
+			//real_t h2 = s_parts[ii].d * s_parts[ii].d * 4;
             i.i = ii;
             for(int_t jo=mg_NS.gridOfPos(pos_a),n=0; n<n_off; ++n)
             for(j=mg_NS.gridFirst[jo+mg_NS.offset[n]]; j.valid(); j=getNextPIdx(j)){
                 if( i==j ) continue;
                 if( !RR_same && isrigidtype && i.t==j.t ) continue;
                 const vec_t& pos_b = getPosOfPIdx(j);
+				real_t h = getDOfPIdx(j) + s_parts[ii].d;
+				real_t h2 = pow(h, 2);
                 //real_t len2 = (pos_a-pos_b).len_square();
                 real_t len2 = pos_a.dis_square(pos_b);
                 if(len2<h2) neigbs.pushBack(j, std::sqrt(len2), m_EC.tooManyNeigb);
@@ -921,6 +941,7 @@ void SphBase::neighbourSearch(
 			for (int ii = 0; ii < num; ++ii) {
 				NeigbStr& neigbs = c_neigbs[ii]; neigbs.clear();
 				const vec_t& pos_a = c_parts[ii].position;
+				real_t h2 = c_parts[ii].d * c_parts[ii].d * 4;
 				i.i = ii;
 				for (int_t jo = mg_NS.gridOfPos(pos_a), n = 0; n < n_off; ++n) {
 					for (j = mg_NS.gridFirst[jo + mg_NS.offset[n]]; j.valid(); j = getNextPIdx(j)) {

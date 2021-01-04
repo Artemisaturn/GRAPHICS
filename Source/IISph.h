@@ -74,7 +74,7 @@ protected:
 	// paritlce-particle interaction, [Mon92], [BT07]
 	inline void ii_fluidPartForceExceptPressure_fsame(
 		FluidPart& fa, const FluidPart& fb, const real_t& dis,
-		const real_t& fm0, const real_t& alpha, const real_t& gamma);
+		const real_t& fm0, const real_t& alpha, const real_t& gamma, const real_t& frho0);
 	// multiphase fluid, [SP08]
 	inline void ii_fluidPartForceExceptPressure_fdiff(
 		FluidPart& fa, const FluidPart& fb, const real_t& dis,

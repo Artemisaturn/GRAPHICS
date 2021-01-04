@@ -33,7 +33,7 @@ public:
 		for (int n = int(f_pts.size()), i = 0; i < n; ++i) {
 			//colorFunc1(f_pts[i].color, f_pts[i]);
 			
-			if (f_pts[i].beta > 0.9) {
+			if (f_pts[i].i_color == 1) {
 				colorFunc1(f_pts[i].color, f_pts[i]);
 			}
 			else {

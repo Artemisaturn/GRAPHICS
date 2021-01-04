@@ -77,6 +77,7 @@ public:
 // fluid particle
 class FluidParticle : public Particle {
 public:
+    int i_color; // 1 blue; 2 red
     real_t density;		// density of particle
     real_t density_adv;
     real_t presure;		// WCSPH or PCISPH
@@ -699,13 +700,34 @@ private:	// these members are about implementation details of neighbourSearch()
 			return m_Candidates[idx.toCandidateI()].candidateParticles[idx.i].position;
 		}
 	}
+    
+    const real_t& getDOfPIdx(const PartIdx& idx) const
+    {
+        if (idx.isFluid()) {
+            return m_Fluids[idx.toFluidI()].fluidParticles[idx.i].d;
+        }
+        if (idx.isSolid()) {
+            return m_Solids[idx.toSolidI()].boundaryParticles[idx.i].d;
+        }
+        if (idx.isCandidate()) {
+            return m_Candidates[idx.toCandidateI()].candidateParticles[idx.i].d;
+        }
+    }
 
 protected:
 
 	inline real_t ker_W(real_t r) const
 		{ return ker_spline(r); /*return ker_spiky(r);*/ }
+    inline real_t ker_W(real_t r, real_t h) const
+    {
+        return ker_spline(r, h); /*return ker_spiky(r);*/
+    }
 	inline real_t ker_W_grad(real_t r) const
 		{ return ker_spline_grad(r); /*return ker_spiky_grad(r);*/ }
+    inline real_t ker_W_grad(real_t r, real_t h) const
+    {
+        return ker_spline_grad(r, h); /*return ker_spiky_grad(r);*/
+    }
 
 	//see 12
 	inline real_t ker_W_laplacian(real_t r) const
@@ -725,7 +747,9 @@ private:
 
     // smoothed kernel and their derivatives
     inline real_t ker_spline(real_t r) const;
+    inline real_t ker_spline(real_t r, real_t h) const;
     inline real_t ker_spline_grad(real_t r) const;
+    inline real_t ker_spline_grad(real_t r, real_t h) const;
     inline real_t ker_spiky(real_t r) const;
     inline real_t ker_spiky_grad(real_t r) const;
 	inline real_t ker_laplacian_vis(real_t r) const;//see 12
@@ -783,6 +807,23 @@ inline real_t SphBase::ker_spline(real_t r) const
 
 }
 
+inline real_t SphBase::ker_spline(real_t r, real_t h) const
+{
+    /*static real_t m_ker_h = m_TH.smoothRadius_h / 2;
+    static real_t m_ker_theta_spline = (vec_t::dim==3)
+        ? 1 / real_t(M_PI) / (m_ker_h*m_ker_h*m_ker_h)
+        : real_t(10) / 7 / real_t(M_PI) / (m_ker_h*m_ker_h);*/
+
+    real_t q = r / h, qm2 = 2 - q;
+    real_t m_ker_theta_spline = (vec_t::dim == 3)
+        ? 1 / real_t(M_PI) / (h * h * h)
+        : real_t(10) / 7 / real_t(M_PI) / (h * h);
+    if( !(q>=0 && q<=2) ) return 0;
+    return q <= 1
+        ? m_ker_theta_spline * (1 - real_t(1.5) * q * q + real_t(0.75) * q * q * q)
+        : m_ker_theta_spline * (real_t(0.25) * qm2 * qm2 * qm2);
+
+}
 /*
  * The graddient of B-cubic spline kernel temp_ker_spline
  * absolute value, the drection towards the center
@@ -799,6 +840,23 @@ inline real_t SphBase::ker_spline_grad(real_t r) const
     return q<=1
         ? m_ker_thetah_spline * ( 3* q - real_t(2.25)* q*q )
         : m_ker_thetah_spline * real_t(0.75)* qm2*qm2;
+
+}
+inline real_t SphBase::ker_spline_grad(real_t r, real_t h) const
+{
+    /*static real_t m_ker_h = m_TH.smoothRadius_h / 2;
+    static real_t m_ker_thetah_spline = (vec_t::dim==3)
+        ? 1 / real_t(M_PI) / (m_ker_h*m_ker_h*m_ker_h) / m_ker_h
+        : real_t(10) / 7 / real_t(M_PI) / (m_ker_h*m_ker_h) / m_ker_h;*/
+
+    real_t q = r / h, qm2 = 2 - q;
+    real_t m_ker_thetah_spline = (vec_t::dim == 3)
+        ? 1 / real_t(M_PI) / (h * h * h) / h
+        : real_t(10) / 7 / real_t(M_PI) / (h * h) / h;
+    if( !(q>=0 && q<=2) ) return 0;
+    return q <= 1
+        ? m_ker_thetah_spline * (3 * q - real_t(2.25) * q * q)
+        : m_ker_thetah_spline * real_t(0.75) * qm2 * qm2;
 
 }
 

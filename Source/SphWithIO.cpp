@@ -33,13 +33,13 @@ void SphWithIO::oglDrawFluidParts( void(*draw1)(), void(*draw2)(), bool(*test)(c
 			glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, f_pts[i].color);
 			glPushMatrix();
 			glTranslatef( (float)p[0], (float)p[1], vec_t::dim==3?(float)p[2]:0 );
-			if (f_pts[i].d == m_TH.spacing_r) {
+		/*	if (f_pts[i].d == m_TH.spacing_r) {
 				draw1();
 			}
 			else {
 				draw2();
-			}
-			//glutSolidSphere(f_pts[i].d / 2, 10, 10);
+			}*/
+			glutSolidSphere(f_pts[i].d / 2, 10, 10);
 			glPopMatrix();
 		}
 	}
@@ -58,7 +58,8 @@ void SphWithIO::oglDrawBounParts( void(*draw)(), bool(*test)(const vec_t& p) )  
 			glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, r_pts[i].color);
 			glPushMatrix();
 			glTranslatef( (float)p[0], (float)p[1], vec_t::dim==3?(float)p[2]:0 );
-			draw();
+			//draw();
+			glutSolidSphere(r_pts[i].d / 2, 10, 10);
 			glPopMatrix();
 		}
 	}
