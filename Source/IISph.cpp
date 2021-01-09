@@ -56,12 +56,12 @@ void IISph::sphStep()
 
 	CALL_TIME(DF_prepareAttribute());
 	//CALL_TIME(DF_prepareAttribute2());
-	CALL_TIME(DF_divergenceFreeSolver());
-	CALL_TIME(DF_constantDensitySolver());
+	//CALL_TIME(DF_divergenceFreeSolver());
+	//CALL_TIME(DF_constantDensitySolver());
 
 	CALL_TIME(VF_prepareAttribute());
-	//CALL_TIME(VF_divergenceFreeSolver());
-	//CALL_TIME(VF_constantVolumeSolver());
+	CALL_TIME(VF_divergenceFreeSolver());
+	CALL_TIME(VF_constantVolumeSolver());
 
 	
 	CALL_TIME(updateFluids());
@@ -123,9 +123,9 @@ void IISph::DF_prepareAttribute() {
 			real_t h = p_a.d;
 			real_t density = ker_W(0, h) * p_a.fm0;
 
-			p_a.DFalpha = 0;
-			p_a.DFalpha1 = vec_t(0, 0, 0);
-			p_a.DFalpha2 = 0;
+			p_a.DF_alpha = 0;
+			p_a.DF_alpha1 = vec_t(0, 0, 0);
+			p_a.DF_alpha2 = 0;
 
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -140,8 +140,8 @@ void IISph::DF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * p_b.fm0;
-					p_a.DFalpha2 += pow(gradScalar * p_b.fm0, 2);
+					p_a.DF_alpha1 += grad * p_b.fm0;
+					p_a.DF_alpha2 += pow(gradScalar * p_b.fm0, 2);
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -152,7 +152,7 @@ void IISph::DF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * p_a.rho0 * p_c.volume;
+					p_a.DF_alpha1 += grad * p_a.rho0 * p_c.volume;
 				}
 				else{
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -163,15 +163,15 @@ void IISph::DF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * m_TH.boundaryDensity * p_b.volume;
+					p_a.DF_alpha1 += grad * m_TH.boundaryDensity * p_b.volume;
 				}
 			}
 			p_a.density = density;
-			p_a.DFalpha = p_a.DFalpha1.len_square() + p_a.DFalpha2;
-			if (p_a.DFalpha < 1.0e-6) {
-				p_a.DFalpha = 1.0e-6;
+			p_a.DF_alpha = p_a.DF_alpha1.len_square() + p_a.DF_alpha2;
+			if (p_a.DF_alpha < 1.0e-6) {
+				p_a.DF_alpha = 1.0e-6;
 			}
-			p_a.DFalpha = p_a.density / p_a.DFalpha;
+			p_a.DF_alpha = p_a.density / p_a.DF_alpha;
 		}
 
 #pragma omp parallel for
@@ -220,9 +220,9 @@ void IISph::DF_prepareAttribute2() {
 			real_t gradScalar = 0;
 			real_t density = ker_W(0) * p_a.fm0;
 
-			p_a.DFalpha = 0;
-			p_a.DFalpha1 = vec_t(0, 0, 0);
-			p_a.DFalpha2 = 0;
+			p_a.DF_alpha = 0;
+			p_a.DF_alpha1 = vec_t(0, 0, 0);
+			p_a.DF_alpha2 = 0;
 
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -236,8 +236,8 @@ void IISph::DF_prepareAttribute2() {
 					gradScalar = -ker_W_grad(neigbs[j].dis);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * p_b.fm0;
-					p_a.DFalpha2 += pow(gradScalar, 2) * p_a.fm0 * p_b.fm0;
+					p_a.DF_alpha1 += grad * p_b.fm0;
+					p_a.DF_alpha2 += pow(gradScalar, 2) * p_a.fm0 * p_b.fm0;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -246,7 +246,7 @@ void IISph::DF_prepareAttribute2() {
 					gradScalar = -ker_W_grad(neigbs[j].dis);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * p_a.rho0 * p_c.volume;
+					p_a.DF_alpha1 += grad * p_a.rho0 * p_c.volume;
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -255,15 +255,15 @@ void IISph::DF_prepareAttribute2() {
 					gradScalar = -ker_W_grad(neigbs[j].dis);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DFalpha1 += grad * m_TH.boundaryDensity * p_b.volume;
+					p_a.DF_alpha1 += grad * m_TH.boundaryDensity * p_b.volume;
 				}
 			}
 			p_a.density = density;
-			p_a.DFalpha = p_a.DFalpha1.len_square() + p_a.DFalpha2;
-			if (p_a.DFalpha < 1.0e-6) {
-				p_a.DFalpha = 1.0e-6;
+			p_a.DF_alpha = p_a.DF_alpha1.len_square() + p_a.DF_alpha2;
+			if (p_a.DF_alpha < 1.0e-6) {
+				p_a.DF_alpha = 1.0e-6;
 			}
-			p_a.DFalpha = p_a.density / p_a.DFalpha;
+			p_a.DF_alpha = p_a.density / p_a.DF_alpha;
 		}
 
 #pragma omp parallel for
@@ -286,7 +286,7 @@ void IISph::DF_prepareAttribute2() {
 }
 
 void IISph::VF_prepareAttribute() {
-	ii_forceExceptPressure();
+	ii_forceExceptPressure();	
 
 	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
 
@@ -311,13 +311,13 @@ void IISph::VF_prepareAttribute() {
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
-			real_t VFvolume = ker_W(0, h) * pow(p_a.volume, 2);
+			real_t VF_volume = ker_W(0, h) * pow(p_a.volume, 2);
 			real_t gamma = p_a.volume * ker_W(0, h);
 
-			p_a.VFvolume = 0;
-			p_a.VFalpha = 0;
-			p_a.VFalpha1 = vec_t(0, 0, 0);
-			p_a.gamma = 0;
+			p_a.VF_volume = 0;
+			p_a.VF_alpha = 0;
+			p_a.VF_alpha1 = vec_t(0, 0, 0);
+			p_a.VF_gamma = 0;
 
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -331,44 +331,44 @@ void IISph::VF_prepareAttribute() {
 					/*if (i == 1) {
 						cout << "ker_W(neigbs[j].dis)_" << j << " : "<< ker_W(neigbs[j].dis, h) << endl;
 					}*/
-					VFvolume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha1 += grad * p_b.volume;
+					p_a.VF_alpha1 += grad * p_b.volume;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_c.d) / 2;
 					gamma += p_c.volume * ker_W(neigbs[j].dis, h);
-					VFvolume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha1 += grad * p_c.volume;
+					p_a.VF_alpha1 += grad * p_c.volume;
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_b.d) / 2;
 					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
-					VFvolume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha1 += grad * p_b.volume;
+					p_a.VF_alpha1 += grad * p_b.volume;
 				}
 			}
 
 			/*if (i < 10) {
 				cout << "gamma_" << i << ": " << gamma << endl;
 			}*/
-			p_a.gamma = gamma;
-			p_a.VFvolume = VFvolume;
+			p_a.VF_gamma = gamma;
+			p_a.VF_volume = VF_volume;
 		}
 
 #pragma omp parallel for
@@ -379,8 +379,8 @@ void IISph::VF_prepareAttribute() {
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
 
-			p_a.VFalpha2 = 0;
-			p_a.VFalpha3 = 0;
+			p_a.VF_alpha2 = 0;
+			p_a.VF_alpha3 = 0;
 
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -392,8 +392,7 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha2 += grad.dot(p_a.VFalpha1) * p_b.volume / p_b.gamma;
-					p_a.VFalpha3 += pow(p_b.volume, 2) * grad.dot(grad) / p_b.fm0 / p_b.gamma;
+					p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / p_b.fm0;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -401,8 +400,7 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha2 += grad.dot(p_a.VFalpha1) * p_c.volume / p_a.gamma;
-					p_a.VFalpha3 += pow(p_c.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_c.volume) / p_a.gamma;
+					p_a.VF_alpha2 += pow(p_c.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_c.volume);
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -410,16 +408,15 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VFalpha2 += grad.dot(p_a.VFalpha1) * p_b.volume / p_a.gamma;
-					p_a.VFalpha3 += pow(p_b.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_b.volume) / p_a.gamma;
+					//p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_b.volume);
 				}
 			}
 
-			p_a.VFalpha = 1 / p_a.fm0 * p_a.VFalpha2 + p_a.VFalpha3;
-			if (p_a.VFalpha < 1.0e-10) {
-				p_a.VFalpha = 1.0e-10;
+			p_a.VF_alpha = ((p_a.VF_alpha1.dot(p_a.VF_alpha1) / p_a.fm0) + p_a.VF_alpha2) / p_a.VF_gamma;
+			if (p_a.VF_alpha < 1.0e-10) {
+				p_a.VF_alpha = 1.0e-10;
 			}
-			p_a.VFalpha = 1 / p_a.VFalpha;
+			p_a.VF_alpha = 1 / p_a.VF_alpha;
 		}
 
 #pragma omp parallel for
@@ -434,10 +431,113 @@ void IISph::VF_prepareAttribute() {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 					real_t h = (p_a.d + p_b.d) / 2;
 					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis, h) / neigbs[j].dis);
-					ni += grad * (1 / p_b.VFvolume); // question
+					ni += grad * (1 / p_b.VF_volume); // question
 				}
 			}
 			p_a.n = ni * m_TH.h;
+		}
+	}
+
+	for (int n_s = int(m_Solids.size()), k = 0; k < n_s; ++k) {
+
+		std::vector<BoundPart>& s_parts = m_Solids[k].boundaryParticles;
+		const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k];
+		int num = int(s_parts.size());
+
+#pragma omp parallel for
+		for (int i = 0; i < num; ++i) {
+			BoundPart& p_a = s_parts[i];
+
+			vec_t grad = vec_t::O;
+			real_t gradScalar = 0;
+			real_t h = p_a.d;
+			real_t VF_volume = ker_W(0, h) * pow(p_a.volume, 2);
+			real_t gamma = p_a.volume * ker_W(0, h);
+
+			p_a.VF_volume = 0;
+			p_a.VF_gamma = 0;
+
+			const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+
+			for (int j = 0; j < n; ++j) {
+
+				if (neigbs[j].pidx.isFluid()) {
+					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+
+					h = (p_a.d + p_b.d) / 2;
+					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+				}
+				else if (neigbs[j].pidx.isCandidate()) {
+					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+
+					h = (p_a.d + p_c.d) / 2;
+					gamma += p_c.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
+
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+				}
+				else {
+					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+
+					h = (p_a.d + p_b.d) / 2;
+					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+				}
+			}
+			p_a.VF_gamma = gamma;
+			p_a.VF_volume = VF_volume;
+		}
+
+#pragma omp parallel for
+		for (int i = 0; i < num; ++i) {
+			BoundPart& p_a = s_parts[i];
+
+			vec_t grad = vec_t::O;
+			real_t gradScalar = 0;
+			real_t h = p_a.d;
+
+			p_a.VF_alpha2 = 0;
+			p_a.VF_alpha3 = 0;
+
+			const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+
+			for (int j = 0; j < n; ++j) {
+
+				if (neigbs[j].pidx.isFluid()) {
+					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+					h = (p_a.d + p_b.d) / 2;
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+					p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / p_b.fm0;
+				}
+				else if (neigbs[j].pidx.isCandidate()) {
+					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+					h = (p_a.d + p_c.d) / 2;
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+				}
+				else {
+					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+					h = (p_a.d + p_b.d) / 2;
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
+					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+				}
+			}
+
+			p_a.VF_alpha = p_a.VF_alpha2 / p_a.VF_gamma;
+			if (p_a.VF_alpha < 1.0e-10) {
+				p_a.VF_alpha = 1.0e-10;
+			}
+			p_a.VF_alpha = 1 / p_a.VF_alpha;
 		}
 	}
 }
@@ -473,7 +573,55 @@ void IISph::VF_constantVolumeSolver() {
 			//cout << "errorRate: " << errorRate << endl;
 
 			real_t densitySum = 0;
+			
+			for (int n_s = int(m_Solids.size()), k_s = 0; k_s < n_s; ++k_s) {
 
+				std::vector<BoundPart>& s_parts = m_Solids[k_s].boundaryParticles;
+				const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k_s];
+				int s_num = int(s_parts.size());
+
+#pragma omp parallel for
+				for (int i = 0; i < s_num; ++i) {
+					BoundPart& p_a = s_parts[i];
+
+					vec_t grad = vec_t::O;
+					real_t gradScalar = 0;
+					real_t h = p_a.d;
+
+					p_a.VF_volume_adv = p_a.VF_volume;
+
+					const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+
+					for (int j = 0; j < n; ++j) {
+						if (neigbs[j].pidx.isFluid()) {
+							const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.VF_volume_adv += (grad.dot(p_a.velocity - p_b.vel_adv) * p_a.volume * p_b.volume) * m_TH.dt;
+						}
+						else if (neigbs[j].pidx.isCandidate()) {
+							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_c.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.VF_volume_adv += (grad.dot(p_a.velocity - p_c.velocity) * p_a.volume * p_c.volume) * m_TH.dt;
+						}
+						else {
+							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+						}
+					}
+
+					if (p_a.VF_volume_adv < p_a.volume) {
+						p_a.VF_volume_adv = p_a.volume;
+					}
+
+					p_a.VF_kappa = (p_a.VF_volume_adv - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VF_alpha;
+				}
+			}
+			
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 				FluidPart& p_a = f_parts[i];
@@ -482,7 +630,7 @@ void IISph::VF_constantVolumeSolver() {
 				real_t gradScalar = 0;
 				real_t h = p_a.d;
 
-				p_a.VFvolume_adv = p_a.VFvolume;
+				p_a.VF_volume_adv = p_a.VF_volume;
 
 				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -493,8 +641,7 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFvolume_adv += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2) * m_TH.dt;
-						p_a.VFvolume_adv += (grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.VFvolume * p_b.volume / p_b.gamma) * m_TH.dt;
+						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.volume * p_b.volume) * m_TH.dt;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -502,8 +649,7 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFvolume_adv += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2) * m_TH.dt;
-						p_a.VFvolume_adv += (grad.dot(p_a.vel_adv - p_c.velocity) * p_a.VFvolume * p_c.volume / p_a.gamma) * m_TH.dt;
+						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_c.velocity) * p_a.volume * p_c.volume) * m_TH.dt;
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -511,20 +657,19 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFvolume_adv += grad.dot(p_a.vel_adv - p_b.velocity) * pow(p_b.volume, 2) * m_TH.dt;
-						p_a.VFvolume_adv += (grad.dot(p_a.vel_adv - p_b.velocity) * p_a.VFvolume * p_b.volume / p_a.gamma) * m_TH.dt;
+						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_b.velocity) * p_a.volume * p_b.volume) * m_TH.dt;
 					}
 				}
 
-				if (p_a.VFvolume_adv < p_a.volume) {
-					p_a.VFvolume_adv = p_a.volume;
+				if (p_a.VF_volume_adv < p_a.volume) {
+					p_a.VF_volume_adv = p_a.volume;
 				}
 			}
 
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) { //particle "i" in "k"
 				FluidPart& p_a = f_parts[i];
-				p_a.VFkappa = (p_a.VFvolume_adv - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VFalpha;
+				p_a.VF_kappa = (p_a.VF_volume_adv - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VF_alpha;
 			}
 			
 #pragma omp parallel for
@@ -544,8 +689,11 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VFkappa / p_a.VFvolume) + (pow(p_b.volume, 4) * p_b.VFkappa / p_b.VFvolume)));
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VFkappa / p_a.gamma) + (pow(p_b.volume, 2) * p_a.volume * p_b.VFkappa / p_b.gamma)));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VF_kappa / p_a.VF_volume) + (pow(p_b.volume, 4) * p_b.VF_kappa / p_b.VF_volume)));
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * 
+							((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma) 
+							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma))
+						);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -553,8 +701,9 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VFkappa / p_a.VFvolume) * 2); // question
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_c.volume * p_a.VFkappa / p_a.gamma) * 2));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappa / p_a.VF_volume) * 2); // question
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 
+							* ((pow(p_a.volume, 2) * p_c.volume * p_a.VF_kappa / p_a.VF_gamma) * 2));
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -562,13 +711,16 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VFkappa / p_a.VFvolume) * 2); // question
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VFkappa / p_a.gamma) * 2));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappa / p_a.VF_volume) * 2); // question
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 
+							* ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma) 
+								+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma))
+							);
 					}
 				}
 
 #pragma omp critical
-				{sumErrorRate += (p_a.VFvolume_adv - p_a.volume) / p_a.volume;}
+				{sumErrorRate += (p_a.VF_volume_adv - p_a.volume) / p_a.volume;}
 			}
 
 			errorRate = sumErrorRate / num;
@@ -694,7 +846,7 @@ void IISph::DF_constantDensitySolver() {
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 				FluidPart& p_a = f_parts[i];
-				p_a.DFkappa = (p_a.density_adv - p_a.rho0) / pow(m_TH.dt, 2) * p_a.DFalpha;
+				p_a.DF_kappa = (p_a.density_adv - p_a.rho0) / pow(m_TH.dt, 2) * p_a.DF_alpha;
 			}
 
 #pragma omp parallel for
@@ -714,7 +866,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DFkappa / p_a.density) + (p_b.DFkappa / p_b.density)) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DF_kappa / p_a.density) + (p_b.DF_kappa / p_b.density)) * m_TH.dt);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -722,7 +874,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DFkappa / p_a.density)*2) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DF_kappa / p_a.density)*2) * m_TH.dt);
 					}
 					else{
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -730,7 +882,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.boundaryDensity * p_b.volume * ((p_a.DFkappa / p_a.density)*2) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.boundaryDensity * p_b.volume * ((p_a.DF_kappa / p_a.density)*2) * m_TH.dt);
 					}
 				}
 			}
@@ -805,7 +957,7 @@ void IISph::DF_divergenceFreeSolver() {
 				vec_t grad = vec_t::O;
 				real_t gradScalar = 0;
 				real_t h = p_a.d;
-				p_a.DFdivergenceDeviation = 0;
+				p_a.DF_divergenceDeviation = 0;
 
 				/* neighbour<vec> and its size */
 				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
@@ -817,7 +969,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_b.fm0;
+						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_b.fm0;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -825,7 +977,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DFdivergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * (p_a.rho0 * p_c.volume);
+						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * (p_a.rho0 * p_c.volume);
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -833,15 +985,15 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * (p_a.rho0 * p_b.volume);
+						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * (p_a.rho0 * p_b.volume);
 					}
 				}
 
-				if (p_a.DFdivergenceDeviation < 0 || (p_a.density + p_a.DFdivergenceDeviation * m_TH.dt) < p_a.rho0) {
-					p_a.DFdivergenceDeviation = 0;
+				if (p_a.DF_divergenceDeviation < 0 || (p_a.density + p_a.DF_divergenceDeviation * m_TH.dt) < p_a.rho0) {
+					p_a.DF_divergenceDeviation = 0;
 				}
 
-				p_a.DFkappaV = p_a.DFdivergenceDeviation * p_a.DFalpha / m_TH.dt;
+				p_a.DF_kappaV = p_a.DF_divergenceDeviation * p_a.DF_alpha / m_TH.dt;
 			}
 
 #pragma omp parallel for
@@ -861,7 +1013,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DFkappaV / p_a.density) + (p_b.DFkappaV / p_b.density)) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DF_kappaV / p_a.density) + (p_b.DF_kappaV / p_b.density)) * m_TH.dt);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -869,7 +1021,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DFkappaV / p_a.density)*2) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DF_kappaV / p_a.density)*2) * m_TH.dt);
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -877,12 +1029,12 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_b.volume * ((p_a.DFkappaV / p_a.density)*2) * m_TH.dt);
+						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_b.volume * ((p_a.DF_kappaV / p_a.density)*2) * m_TH.dt);
 					}
 				}
 
 #pragma omp critical
-				{ divergenceDeviationAver += p_a.DFdivergenceDeviation; }
+				{ divergenceDeviationAver += p_a.DF_divergenceDeviation; }
 			}
 			divergenceDeviationAver = divergenceDeviationAver / num * m_TH.dt;
 			//cout << "divergence correction: " << divergenceDeviationAver << endl;
@@ -926,6 +1078,57 @@ void IISph::VF_divergenceFreeSolver() {
 			//cout << "divergenceDeviationAver: " << divergenceDeviationAver << endl;
 			divergenceDeviationAver = 0;
 
+			for (int n_s = int(m_Solids.size()), k_s = 0; k_s < n_s; ++k_s) {
+
+				std::vector<BoundPart>& s_parts = m_Solids[k_s].boundaryParticles;
+				const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k_s];
+				int s_num = int(s_parts.size());
+
+#pragma omp parallel for
+				for (int i = 0; i < s_num; ++i) {
+
+					BoundPart& p_a = s_parts[i];
+
+					vec_t grad = vec_t::O;
+					real_t gradScalar = 0;
+					real_t h = p_a.d;
+					p_a.VF_divergenceDeviation = 0;
+
+					const Neigb* neigbs = r_neigbs[i].neigs; int n = f_neigbs[i].num;
+
+					for (int j = 0; j < n; ++j) {
+						if (neigbs[j].pidx.isFluid()) {
+							const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2);
+							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_b.vel_adv) * p_a.volume * p_b.volume;
+						}
+						else if (neigbs[j].pidx.isCandidate()) {
+							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_c.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+
+							//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2);
+							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_c.velocity) * p_a.volume * p_c.volume;
+						}
+						else {
+							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+						}
+					}
+
+					if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_volume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.volume) {
+						p_a.VF_divergenceDeviation = 0;
+					}
+
+					p_a.VF_kappaV = p_a.VF_divergenceDeviation * p_a.VF_alpha / m_TH.dt / pow(p_a.volume, 3);
+				}
+
+			}
+
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 
@@ -934,7 +1137,7 @@ void IISph::VF_divergenceFreeSolver() {
 				vec_t grad = vec_t::O;
 				real_t gradScalar = 0;
 				real_t h = p_a.d;
-				p_a.VFdivergenceDeviation = 0;
+				p_a.VF_divergenceDeviation = 0;
 
 				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -945,8 +1148,8 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2);
-						p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.VFvolume * p_b.volume / p_b.gamma;
+						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2);
+						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.volume * p_b.volume;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -954,8 +1157,8 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2);
-						p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * p_a.VFvolume * p_c.volume / p_a.gamma;
+						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2);
+						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * p_a.volume * p_c.volume;
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -963,16 +1166,16 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * pow(p_b.volume, 2);
-						p_a.VFdivergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * p_a.VFvolume * p_b.volume / p_a.gamma;
+						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * pow(p_b.volume, 2);
+						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * p_a.volume * p_b.volume;
 					}
 				}
 
-				if (p_a.VFdivergenceDeviation < 0 || (p_a.VFvolume + p_a.VFdivergenceDeviation * m_TH.dt) < p_a.volume) {
-					p_a.VFdivergenceDeviation = 0;
+				if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_volume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.volume) {
+					p_a.VF_divergenceDeviation = 0;
 				}
 
-				p_a.VFkappaV = p_a.VFdivergenceDeviation * p_a.VFalpha / m_TH.dt / pow(p_a.volume, 3);
+				p_a.VF_kappaV = p_a.VF_divergenceDeviation * p_a.VF_alpha / m_TH.dt / pow(p_a.volume, 3);
 			}
 
 #pragma omp parallel for
@@ -993,8 +1196,9 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VFkappaV / p_a.VFvolume) + (pow(p_b.volume, 4) * p_b.VFkappaV / p_b.VFvolume)));
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VFkappaV / p_a.gamma) + (pow(p_b.volume, 2) * p_a.volume * p_b.VFkappaV / p_b.gamma)));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VF_kappaV / p_a.VF_volume) + (pow(p_b.volume, 4) * p_b.VF_kappaV / p_b.VF_volume)));
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma) 
+							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -1002,8 +1206,8 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VFkappaV / p_a.VFvolume) * 2);
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_c.volume * p_a.VFkappaV / p_a.gamma) * 2));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappaV / p_a.VF_volume) * 2);
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_c.volume * p_a.VF_kappaV / p_a.VF_gamma) * 2));
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -1011,12 +1215,13 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VFkappaV / p_a.VFvolume) * 2);
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VFkappaV / p_a.gamma) * 2));
+						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappaV / p_a.VF_volume) * 2);
+						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma) 
+							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
 					}
 				}
 #pragma omp critical
-				{ divergenceDeviationAver += p_a.VFdivergenceDeviation; }
+				{ divergenceDeviationAver += p_a.VF_divergenceDeviation; }
 			}
 
 			divergenceDeviationAver = divergenceDeviationAver / num * m_TH.dt;
@@ -1355,10 +1560,10 @@ inline void IISph::ii_fluidPartForceExceptPressure_fsame(
 	//	//cout << "acce_f: " << acce << endl;
 	//}
 	//if (acce) { xab *= acce / dis2; fa.acce_adv += xab; }
-	if (pro < 0) {
-		acce = 2 * alpha * (vec_t::dim + 2) * (fb.volume / fb.gamma) * pro / (dis2 * dis2 + 1e-6) * grad;
+	//if (pro < 0) {
+		acce = 2 * alpha * (vec_t::dim + 2) * (fb.volume / fb.VF_gamma) * pro / (dis2 * dis2 + 1e-6) * grad;
 		//	cout << "acce_f: " << acce << endl;
-	}
+	//}
 	if (acce) { xab *= acce; fa.acce_adv += xab; }
 
 	// surface tension
@@ -1433,10 +1638,10 @@ inline void IISph::ii_fluidPartForceExceptPressure_bound(
 	//	//cout << "acce_b: " << acce << endl;
 	//}
 	//if (acce) { xab *= acce; fa.acce_adv += xab; }
-	if (pro < 0) {
-		acce = 2 * r_alpha * (vec_t::dim + 2) * (rb.volume / fa.gamma) * pro / (dis * dis + 1e-6) * grad;
+	//if (pro < 0) {
+		acce = 2 * r_alpha * (vec_t::dim + 2) * (rb.volume / rb.VF_gamma) * pro / (dis * dis + 1e-6) * grad;
 		//cout << "acce: " << acce << endl;
-	}
+	//}
 	if (acce) { xab *= acce; fa.acce_adv += xab; }
 
 	if (m_TH.applyAdhesion) {

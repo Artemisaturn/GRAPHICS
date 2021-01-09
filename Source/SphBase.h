@@ -71,7 +71,18 @@ public:
 	real_t temperature;//see 12
 	real_t temperatureNext;//see 12
     float color[4];	// RGBA color
-    real_t d; //dia
+    real_t d; //diameter
+    real_t VF_gamma = 1;
+    real_t VF_alpha;
+    vec_t VF_alpha1;
+    real_t VF_alpha2;
+    real_t VF_alpha3;
+    real_t VF_alpha4;
+    real_t VF_kappa;
+    real_t VF_kappaV;
+    real_t VF_volume;
+    real_t VF_volume_adv;
+    real_t VF_divergenceDeviation;
 };
 
 // fluid particle
@@ -88,24 +99,27 @@ public:
     real_t beta;
     real_t temp_beta;
 
-    real_t DFalpha;
-    vec_t DFalpha1;
-    real_t DFalpha2;
-    real_t DFkappa;
-    real_t DFkappaV;
-    real_t DFdivergenceDeviation;
+    real_t DF_alpha;
+    vec_t DF_alpha1;
+    real_t DF_alpha2;
+    real_t DF_kappa;
+    real_t DF_kappaV;
+    real_t DF_divergenceDeviation;
 
-    real_t gamma;
-    real_t VFvolume;
-    real_t VFvolume_adv;
-    real_t VFalpha;
-    vec_t VFalpha1;
-    real_t VFalpha2;
-    real_t VFalpha3;
-    real_t VFalpha4;
-    real_t VFkappa;
-    real_t VFkappaV;
-    real_t VFdivergenceDeviation;
+    std::vector<real_t> MT_restVolumeFraction;
+    std::vector<real_t> MT_volumeFraction;
+    std::vector<real_t> MT_deltaVolumeFraction;
+    std::vector<real_t> MT_restDensity;
+    std::vector<real_t> MT_phaseDensity;
+    
+    std::vector<vec_t> MT_interfacialMomentum;
+    std::vector<vec_t> MT_driftVelocity;
+    std::vector<vec_t> MT_phaseVelocity;
+    
+    vec_t MT_pressureAcceleration;
+
+    real_t MT_Beta;
+    real_t MT_theta;
 
 #ifdef WC_TIMEADAPTIVE
 	real_t t_last, dt_raw, dt, drho;
