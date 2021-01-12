@@ -69,20 +69,18 @@ protected:
 	// compute fluid particles' pressure, WCSPH or PCISPH
 	void ii_computePressure();
 
-	void ii_forceExceptPressure();
+	void advectionStep();
 
 	// paritlce-particle interaction, [Mon92], [BT07]
-	inline void ii_fluidPartForceExceptPressure_fsame(
-		FluidPart& fa, const FluidPart& fb, const real_t& dis,
-		const real_t& fm0, const real_t& alpha, const real_t& gamma, const real_t& frho0);
+	inline void f2fAdvection(
+		FluidPart& fa, const FluidPart& fb, const real_t& dis);
 	// multiphase fluid, [SP08]
 	inline void ii_fluidPartForceExceptPressure_fdiff(
 		FluidPart& fa, const FluidPart& fb, const real_t& dis,
 		const real_t& fma, const real_t& fmb, const real_t& alpha);
 	// fluid-rigid coupling, [AIS*12]
-	inline void ii_fluidPartForceExceptPressure_bound(
-		FluidPart& fa, const BoundPart& rb, const real_t& dis,
-		const real_t& frho0, const real_t& r_alpha);
+	inline void b2fAdvection(
+		FluidPart& fa, const BoundPart& rb, const real_t& dis);
 
 	// paritlce-particle interaction, [Mon92], [BT07]
 	inline void ii_fluidPartForcePressure_fsame(

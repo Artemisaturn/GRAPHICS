@@ -51,15 +51,15 @@ void IISph::sphStep()
 
 	CALL_TIME(updateSolidPartWeight());
 
-	//CALL_TIME(ii_computePressure());
-	//CALL_TIME(ii_computeForcePressure());
-
 	CALL_TIME(DF_prepareAttribute());
-	//CALL_TIME(DF_prepareAttribute2());
+	CALL_TIME(VF_prepareAttribute());
+
+	CALL_TIME(advectionStep());
+
 	//CALL_TIME(DF_divergenceFreeSolver());
 	//CALL_TIME(DF_constantDensitySolver());
 
-	CALL_TIME(VF_prepareAttribute());
+
 	CALL_TIME(VF_divergenceFreeSolver());
 	CALL_TIME(VF_constantVolumeSolver());
 
@@ -98,21 +98,47 @@ void IISph::sphStep()
 }
 
 void IISph::DF_prepareAttribute() {
-	ii_forceExceptPressure();
 
 	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
+
 		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
 		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
+
 		real_t rho0 = m_Fluids[k].restDensity_rho0;
 		int num = int(f_parts.size());
 
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = std::pow(p_a.d, vec_t::dim);
-			p_a.rho0 = rho0 * p_a.beta;
-			p_a.fm0 = p_a.rho0 * p_a.volume;
+			p_a.restVolume = std::pow(p_a.d, vec_t::dim);
+			p_a.restDensity = rho0 * p_a.beta;
+			p_a.mass = p_a.restDensity * p_a.restVolume;
+			p_a.advectionAcceleration = vec_t(0, 0, 0);
 		}
+	}
+
+	for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
+
+		std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+		const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+
+		int num = int(b_parts.size());
+
+#pragma omp parallel for
+		for (int i = 0; i < num; ++i) {
+			BoundPart& p_a = b_parts[i];
+			p_a.mass = p_a.restDensity * p_a.volume;
+			p_a.advectionAcceleration = vec_t(0, 0, 0);
+		}
+	}
+
+	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
+
+		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
+		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
+
+		real_t rho0 = m_Fluids[k].restDensity_rho0;
+		int num = int(f_parts.size());
 
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
@@ -121,7 +147,7 @@ void IISph::DF_prepareAttribute() {
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
-			real_t density = ker_W(0, h) * p_a.fm0;
+			real_t density = ker_W(0, h) * p_a.mass;
 
 			p_a.DF_alpha = 0;
 			p_a.DF_alpha1 = vec_t(0, 0, 0);
@@ -134,44 +160,47 @@ void IISph::DF_prepareAttribute() {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_b.d) / 2;
-					if (m_TH.adjustDensity) { density += p_a.fm0 * ker_W(neigbs[j].dis, h); }
-					else{ density += p_b.fm0 * ker_W(neigbs[j].dis, h); }
+					if (m_TH.adjustDensity) { density += p_a.mass * ker_W(neigbs[j].dis, h); }
+					else{ density += p_b.mass * ker_W(neigbs[j].dis, h); }
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DF_alpha1 += grad * p_b.fm0;
-					p_a.DF_alpha2 += pow(gradScalar * p_b.fm0, 2);
+					p_a.DF_alpha1 += grad * p_b.mass;
+					p_a.DF_alpha2 += pow(gradScalar * p_b.mass, 2);
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_c.d) / 2;
-					density += p_a.rho0 * p_c.volume * ker_W(neigbs[j].dis, h);
+					density += p_a.restDensity * p_c.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DF_alpha1 += grad * p_a.rho0 * p_c.volume;
+					p_a.DF_alpha1 += grad * p_a.restDensity * p_c.volume;
 				}
 				else{
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_b.d) / 2;
-					density += p_a.rho0 * p_b.volume * ker_W(neigbs[j].dis, h);
+					density += p_a.restDensity * p_b.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 					p_a.DF_alpha1 += grad * m_TH.boundaryDensity * p_b.volume;
+					if (m_Solids[neigbs[j].pidx.toSolidI()].dynamic) {
+						p_a.DF_alpha2 += pow(gradScalar * p_b.mass, 2);
+					}
 				}
 			}
-			p_a.density = density;
+			p_a.sphDensity = density;
 			p_a.DF_alpha = p_a.DF_alpha1.len_square() + p_a.DF_alpha2;
 			if (p_a.DF_alpha < 1.0e-6) {
 				p_a.DF_alpha = 1.0e-6;
 			}
-			p_a.DF_alpha = p_a.density / p_a.DF_alpha;
+			p_a.DF_alpha = p_a.sphDensity / p_a.DF_alpha;
 		}
 
 #pragma omp parallel for
@@ -186,107 +215,79 @@ void IISph::DF_prepareAttribute() {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 					real_t h = (p_a.d + p_b.d) / 2;
 					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis, h) / neigbs[j].dis);
-					ni += grad * (p_b.fm0 / p_b.density); // question
+					ni += grad * (p_b.mass / p_b.sphDensity); // question
 				}
 			}
 			p_a.n = ni * m_TH.h;
 		}
 	}
-}
 
-void IISph::DF_prepareAttribute2() {
-	ii_forceExceptPressure();
+	for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
 
-	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
-		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
-		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
+		std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+		const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
 
-		real_t rho0 = m_Fluids[k].restDensity_rho0;
-		int num = int(f_parts.size());
+		int num = int(b_parts.size());
 
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
-			FluidPart& p_a = f_parts[i];
-			p_a.volume = std::pow(p_a.d, vec_t::dim);
-			p_a.rho0 = rho0 * p_a.beta;
-			p_a.fm0 = p_a.rho0 * p_a.volume;
-		}
-
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			FluidPart& p_a = f_parts[i];
+			BoundPart& p_a = b_parts[i];
 
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
-			real_t density = ker_W(0) * p_a.fm0;
+			real_t h = p_a.d;
+			real_t density = ker_W(0, h) * p_a.mass;
 
 			p_a.DF_alpha = 0;
 			p_a.DF_alpha1 = vec_t(0, 0, 0);
 			p_a.DF_alpha2 = 0;
 
-			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
+			const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
 
 			for (int j = 0; j < n; ++j) {
 				if (neigbs[j].pidx.isFluid()) {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 
-					if (m_TH.adjustDensity) { density += p_a.fm0 * ker_W(neigbs[j].dis); }
-					else { density += p_b.fm0 * ker_W(neigbs[j].dis); }
+					h = (p_a.d + p_b.d) / 2;
+					if (m_TH.adjustDensity) { density += p_a.mass * ker_W(neigbs[j].dis, h); }
+					else { density += p_b.mass * ker_W(neigbs[j].dis, h); }
 
-					gradScalar = -ker_W_grad(neigbs[j].dis);
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DF_alpha1 += grad * p_b.fm0;
-					p_a.DF_alpha2 += pow(gradScalar, 2) * p_a.fm0 * p_b.fm0;
+					p_a.DF_alpha2 += pow(gradScalar * p_b.mass, 2);
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-					density += p_a.rho0 * p_c.volume * ker_W(neigbs[j].dis);
 
-					gradScalar = -ker_W_grad(neigbs[j].dis);
+					h = (p_a.d + p_c.d) / 2; 
+					density += p_a.restDensity * p_c.volume * ker_W(neigbs[j].dis, h);
+
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.DF_alpha1 += grad * p_a.rho0 * p_c.volume;
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-					density += p_a.rho0 * p_b.volume * ker_W(neigbs[j].dis);
 
-					gradScalar = -ker_W_grad(neigbs[j].dis);
+					h = (p_a.d + p_b.d) / 2;
+					density += p_a.restDensity * p_b.volume * ker_W(neigbs[j].dis, h);
+
+					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
-
-					p_a.DF_alpha1 += grad * m_TH.boundaryDensity * p_b.volume;
 				}
 			}
-			p_a.density = density;
-			p_a.DF_alpha = p_a.DF_alpha1.len_square() + p_a.DF_alpha2;
+			p_a.sphDensity = density;
+			p_a.DF_alpha = p_a.DF_alpha2;
 			if (p_a.DF_alpha < 1.0e-6) {
 				p_a.DF_alpha = 1.0e-6;
 			}
-			p_a.DF_alpha = p_a.density / p_a.DF_alpha;
-		}
-
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			FluidPart& p_a = f_parts[i];
-			vec_t grad;
-			vec_t ni = vec_t::O;
-			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-			for (int j = 0; j < n; ++j) {
-				grad = vec_t::O;
-				if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					ni += grad * (p_b.fm0 / p_b.density); // question
-				}
-			}
-			p_a.n = ni * m_TH.h;
+			p_a.DF_alpha = p_a.sphDensity / p_a.DF_alpha;
 		}
 	}
 }
 
 void IISph::VF_prepareAttribute() {
-	ii_forceExceptPressure();	
 
 	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
 
@@ -299,11 +300,20 @@ void IISph::VF_prepareAttribute() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = std::pow(p_a.d, vec_t::dim);
-			p_a.rho0 = rho0 * p_a.beta;
-			p_a.fm0 = p_a.rho0 * p_a.volume;
+			p_a.restVolume = std::pow(p_a.d, vec_t::dim);
+			p_a.restDensity = rho0 * p_a.beta;
+			p_a.mass = p_a.restDensity * p_a.restVolume;
+			p_a.advectionAcceleration = vec_t(0, 0, 0);
 		}
+	}
 
+	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
+
+		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
+		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
+
+		real_t rho0 = m_Fluids[k].restDensity_rho0;
+		int num = int(f_parts.size());
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
@@ -311,10 +321,10 @@ void IISph::VF_prepareAttribute() {
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
-			real_t VF_volume = ker_W(0, h) * pow(p_a.volume, 2);
-			real_t gamma = p_a.volume * ker_W(0, h);
+			real_t VF_sphVolume = ker_W(0, h) * pow(p_a.restVolume, 2);
+			real_t gamma = p_a.restVolume * ker_W(0, h);
 
-			p_a.VF_volume = 0;
+			p_a.VF_sphVolume = 0;
 			p_a.VF_alpha = 0;
 			p_a.VF_alpha1 = vec_t(0, 0, 0);
 			p_a.VF_gamma = 0;
@@ -327,23 +337,23 @@ void IISph::VF_prepareAttribute() {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_b.d) / 2;
-					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
+					gamma += p_b.restVolume * ker_W(neigbs[j].dis, h);
 					/*if (i == 1) {
 						cout << "ker_W(neigbs[j].dis)_" << j << " : "<< ker_W(neigbs[j].dis, h) << endl;
 					}*/
-					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_sphVolume += p_a.restVolume * p_b.restVolume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VF_alpha1 += grad * p_b.volume;
+					p_a.VF_alpha1 += grad * p_b.restVolume;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
 
 					h = (p_a.d + p_c.d) / 2;
 					gamma += p_c.volume * ker_W(neigbs[j].dis, h);
-					VF_volume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
+					VF_sphVolume += p_a.restVolume * p_c.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
@@ -355,7 +365,7 @@ void IISph::VF_prepareAttribute() {
 
 					h = (p_a.d + p_b.d) / 2;
 					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
-					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
+					VF_sphVolume += p_a.restVolume * p_b.volume * ker_W(neigbs[j].dis, h);
 
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
@@ -368,7 +378,7 @@ void IISph::VF_prepareAttribute() {
 				cout << "gamma_" << i << ": " << gamma << endl;
 			}*/
 			p_a.VF_gamma = gamma;
-			p_a.VF_volume = VF_volume;
+			p_a.VF_sphVolume = VF_sphVolume;
 		}
 
 #pragma omp parallel for
@@ -380,7 +390,6 @@ void IISph::VF_prepareAttribute() {
 			real_t h = p_a.d;
 
 			p_a.VF_alpha2 = 0;
-			p_a.VF_alpha3 = 0;
 
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -392,7 +401,7 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / p_b.fm0;
+					p_a.VF_alpha2 += pow(p_b.restVolume, 2) * grad.dot(grad) / p_b.mass;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -400,7 +409,7 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VF_alpha2 += pow(p_c.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_c.volume);
+					p_a.VF_alpha2 += pow(p_c.volume, 2) * grad.dot(grad) / (p_a.restDensity * p_c.volume);
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -408,11 +417,13 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					//p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / (p_a.rho0 * p_b.volume);
+					if (m_Solids[neigbs[j].pidx.toSolidI()].dynamic) {
+						p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / (p_b.restDensity * p_b.volume);
+					}
 				}
 			}
 
-			p_a.VF_alpha = ((p_a.VF_alpha1.dot(p_a.VF_alpha1) / p_a.fm0) + p_a.VF_alpha2) / p_a.VF_gamma;
+			p_a.VF_alpha = ((p_a.VF_alpha1.dot(p_a.VF_alpha1) / p_a.mass) + p_a.VF_alpha2) / p_a.VF_gamma;
 			if (p_a.VF_alpha < 1.0e-10) {
 				p_a.VF_alpha = 1.0e-10;
 			}
@@ -431,83 +442,72 @@ void IISph::VF_prepareAttribute() {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
 					real_t h = (p_a.d + p_b.d) / 2;
 					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis, h) / neigbs[j].dis);
-					ni += grad * (1 / p_b.VF_volume); // question
+					ni += grad * (1 / p_b.VF_sphVolume); // question
 				}
 			}
 			p_a.n = ni * m_TH.h;
 		}
 	}
 
-	for (int n_s = int(m_Solids.size()), k = 0; k < n_s; ++k) {
+	for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
 
-		std::vector<BoundPart>& s_parts = m_Solids[k].boundaryParticles;
-		const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k];
-		int num = int(s_parts.size());
+		std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+		const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+		int num = int(b_parts.size());
 
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
-			BoundPart& p_a = s_parts[i];
+			BoundPart& p_a = b_parts[i];
 
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
-			real_t VF_volume = ker_W(0, h) * pow(p_a.volume, 2);
+			real_t VF_sphVolume = ker_W(0, h) * pow(p_a.volume, 2);
 			real_t gamma = p_a.volume * ker_W(0, h);
 
-			p_a.VF_volume = 0;
+			p_a.VF_sphVolume = 0;
 			p_a.VF_gamma = 0;
+			p_a.force = vec_t::O;
 
-			const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+			const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
 
 			for (int j = 0; j < n; ++j) {
 
 				if (neigbs[j].pidx.isFluid()) {
 					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-
 					h = (p_a.d + p_b.d) / 2;
-					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
-					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
-
-					gradScalar = -ker_W_grad(neigbs[j].dis, h);
-					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+					gamma += p_b.restVolume * ker_W(neigbs[j].dis, h);
+					VF_sphVolume += p_a.volume * p_b.restVolume * ker_W(neigbs[j].dis, h);
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-
 					h = (p_a.d + p_c.d) / 2;
 					gamma += p_c.volume * ker_W(neigbs[j].dis, h);
-					VF_volume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
-
-					gradScalar = -ker_W_grad(neigbs[j].dis, h);
-					grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+					VF_sphVolume += p_a.volume * p_c.volume * ker_W(neigbs[j].dis, h);
 				}
 				else {
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-
 					h = (p_a.d + p_b.d) / 2;
 					gamma += p_b.volume * ker_W(neigbs[j].dis, h);
-					VF_volume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
-
-					gradScalar = -ker_W_grad(neigbs[j].dis, h);
-					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+					VF_sphVolume += p_a.volume * p_b.volume * ker_W(neigbs[j].dis, h);
 				}
 			}
 			p_a.VF_gamma = gamma;
-			p_a.VF_volume = VF_volume;
+			p_a.VF_sphVolume = VF_sphVolume;
 		}
 
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
-			BoundPart& p_a = s_parts[i];
+			BoundPart& p_a = b_parts[i];
 
 			vec_t grad = vec_t::O;
 			real_t gradScalar = 0;
 			real_t h = p_a.d;
 
+			p_a.VF_alpha1 = vec_t(0, 0, 0);
 			p_a.VF_alpha2 = 0;
-			p_a.VF_alpha3 = 0;
 
-			const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+			const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
 
 			for (int j = 0; j < n; ++j) {
 
@@ -517,7 +517,7 @@ void IISph::VF_prepareAttribute() {
 					gradScalar = -ker_W_grad(neigbs[j].dis, h);
 					grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-					p_a.VF_alpha2 += pow(p_b.volume, 2) * grad.dot(grad) / p_b.fm0;
+					p_a.VF_alpha2 += pow(p_b.restVolume, 2) * grad.dot(grad) / p_b.mass;
 				}
 				else if (neigbs[j].pidx.isCandidate()) {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -539,6 +539,7 @@ void IISph::VF_prepareAttribute() {
 			}
 			p_a.VF_alpha = 1 / p_a.VF_alpha;
 		}
+
 	}
 }
 
@@ -561,8 +562,8 @@ void IISph::VF_constantVolumeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.vel_adv = p_a.velocity + p_a.acce_adv * m_TH.dt;
+			p_a.restVolume = pow(p_a.d, vec_t::dim);
+			p_a.advectionVelocity = p_a.velocity + p_a.advectionAcceleration * m_TH.dt;
 		}
 
 		while (errorRate > errorRateGoal || currentIteration < minimumIteration) {
@@ -573,24 +574,24 @@ void IISph::VF_constantVolumeSolver() {
 			//cout << "errorRate: " << errorRate << endl;
 
 			real_t densitySum = 0;
-			
-			for (int n_s = int(m_Solids.size()), k_s = 0; k_s < n_s; ++k_s) {
 
-				std::vector<BoundPart>& s_parts = m_Solids[k_s].boundaryParticles;
-				const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k_s];
-				int s_num = int(s_parts.size());
+			for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
+
+				std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+				const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+				int b_num = int(b_parts.size());
 
 #pragma omp parallel for
-				for (int i = 0; i < s_num; ++i) {
-					BoundPart& p_a = s_parts[i];
+				for (int i = 0; i < b_num; ++i) {
+					BoundPart& p_a = b_parts[i];
 
 					vec_t grad = vec_t::O;
 					real_t gradScalar = 0;
 					real_t h = p_a.d;
 
-					p_a.VF_volume_adv = p_a.VF_volume;
+					p_a.VF_advectionVolume = p_a.VF_sphVolume;
 
-					const Neigb* neigbs = r_neigbs[i].neigs; int n = r_neigbs[i].num;
+					const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
 
 					for (int j = 0; j < n; ++j) {
 						if (neigbs[j].pidx.isFluid()) {
@@ -599,7 +600,7 @@ void IISph::VF_constantVolumeSolver() {
 							gradScalar = -ker_W_grad(neigbs[j].dis, h);
 							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-							p_a.VF_volume_adv += (grad.dot(p_a.velocity - p_b.vel_adv) * p_a.volume * p_b.volume) * m_TH.dt;
+							p_a.VF_advectionVolume += (grad.dot(p_a.velocity - p_b.advectionVelocity) * p_a.volume * p_b.restVolume) * m_TH.dt;
 						}
 						else if (neigbs[j].pidx.isCandidate()) {
 							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -607,21 +608,26 @@ void IISph::VF_constantVolumeSolver() {
 							gradScalar = -ker_W_grad(neigbs[j].dis, h);
 							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-							p_a.VF_volume_adv += (grad.dot(p_a.velocity - p_c.velocity) * p_a.volume * p_c.volume) * m_TH.dt;
+							p_a.VF_advectionVolume += (grad.dot(p_a.velocity - p_c.velocity) * p_a.volume * p_c.volume) * m_TH.dt;
 						}
 						else {
 							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.VF_advectionVolume += (grad.dot(p_a.velocity - p_b.velocity) * p_a.volume * p_b.volume) * m_TH.dt;
 						}
 					}
 
-					if (p_a.VF_volume_adv < p_a.volume) {
-						p_a.VF_volume_adv = p_a.volume;
+					if (p_a.VF_advectionVolume < p_a.volume) {
+						p_a.VF_advectionVolume = p_a.volume;
 					}
 
-					p_a.VF_kappa = (p_a.VF_volume_adv - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VF_alpha;
+					p_a.VF_kappa = (p_a.VF_advectionVolume - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VF_alpha;
 				}
 			}
-			
+
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 				FluidPart& p_a = f_parts[i];
@@ -630,7 +636,7 @@ void IISph::VF_constantVolumeSolver() {
 				real_t gradScalar = 0;
 				real_t h = p_a.d;
 
-				p_a.VF_volume_adv = p_a.VF_volume;
+				p_a.VF_advectionVolume = p_a.VF_sphVolume;
 
 				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 
@@ -641,7 +647,7 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.volume * p_b.volume) * m_TH.dt;
+						p_a.VF_advectionVolume += (grad.dot(p_a.advectionVelocity - p_b.advectionVelocity) * p_a.restVolume * p_b.restVolume) * m_TH.dt;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -649,7 +655,7 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_c.velocity) * p_a.volume * p_c.volume) * m_TH.dt;
+						p_a.VF_advectionVolume += (grad.dot(p_a.advectionVelocity - p_c.velocity) * p_a.restVolume * p_c.volume) * m_TH.dt;
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -657,19 +663,67 @@ void IISph::VF_constantVolumeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.VF_volume_adv += (grad.dot(p_a.vel_adv - p_b.velocity) * p_a.volume * p_b.volume) * m_TH.dt;
+						p_a.VF_advectionVolume += (grad.dot(p_a.advectionVelocity - p_b.velocity) * p_a.restVolume * p_b.volume) * m_TH.dt;
 					}
 				}
 
-				if (p_a.VF_volume_adv < p_a.volume) {
-					p_a.VF_volume_adv = p_a.volume;
+				if (p_a.VF_advectionVolume < p_a.restVolume) {
+					p_a.VF_advectionVolume = p_a.restVolume;
 				}
 			}
 
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) { //particle "i" in "k"
 				FluidPart& p_a = f_parts[i];
-				p_a.VF_kappa = (p_a.VF_volume_adv - p_a.volume) / pow(m_TH.dt, 2) / pow(p_a.volume, 3) * p_a.VF_alpha;
+				p_a.VF_kappa = (p_a.VF_advectionVolume - p_a.restVolume) / pow(m_TH.dt, 2) / pow(p_a.restVolume, 3) * p_a.VF_alpha;
+			}
+
+			//calculate force
+			for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
+				if (m_Solids[k].dynamic) {
+					if (m_Solids[k].type == Solid::RIGIDBODY) { // rigidbody
+						std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+						const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+						int b_num = int(b_parts.size());
+
+#pragma omp parallel for
+						for (int i = 0; i < b_num; ++i) {
+							BoundPart& p_a = b_parts[i];
+							vec_t grad = vec_t::O;
+							real_t gradScalar = 0;
+							real_t h = p_a.d;
+
+							const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
+
+							for (int j = 0; j < n; ++j) {
+								if (neigbs[j].pidx.isFluid()) {
+									const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_b.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+									p_a.force = p_a.force - (grad *((pow(p_a.volume, 2) * p_b.restVolume * p_a.VF_kappa / p_a.VF_gamma)
+											+ (pow(p_b.restVolume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma)));
+								}
+								else if (neigbs[j].pidx.isCandidate()) {
+									const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_c.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+								}
+								else {
+									const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_b.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+									p_a.force = p_a.force - (grad * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma)
+										+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma)));
+								}
+							}
+						}
+					}
+				}
 			}
 			
 #pragma omp parallel for
@@ -690,9 +744,9 @@ void IISph::VF_constantVolumeSolver() {
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VF_kappa / p_a.VF_volume) + (pow(p_b.volume, 4) * p_b.VF_kappa / p_b.VF_volume)));
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * 
-							((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma) 
-							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma))
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass *
+							((pow(p_a.restVolume, 2) * p_b.restVolume * p_a.VF_kappa / p_a.VF_gamma)
+							+ (pow(p_b.restVolume, 2) * p_a.restVolume * p_b.VF_kappa / p_b.VF_gamma))
 						);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
@@ -702,8 +756,8 @@ void IISph::VF_constantVolumeSolver() {
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappa / p_a.VF_volume) * 2); // question
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 
-							* ((pow(p_a.volume, 2) * p_c.volume * p_a.VF_kappa / p_a.VF_gamma) * 2));
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass
+							* ((pow(p_a.restVolume, 2) * p_c.volume * p_a.VF_kappa / p_a.VF_gamma) * 2));
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -712,15 +766,14 @@ void IISph::VF_constantVolumeSolver() {
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappa / p_a.VF_volume) * 2); // question
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 
-							* ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma) 
-								+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappa / p_b.VF_gamma))
-							);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass
+							* ((pow(p_a.restVolume, 2) * p_b.volume * p_a.VF_kappa / p_a.VF_gamma)
+								+ (pow(p_b.volume, 2) * p_a.restVolume * p_b.VF_kappa / p_b.VF_gamma)));
 					}
 				}
 
 #pragma omp critical
-				{sumErrorRate += (p_a.VF_volume_adv - p_a.volume) / p_a.volume;}
+				{sumErrorRate += (p_a.VF_advectionVolume - p_a.restVolume) / p_a.restVolume;}
 			}
 
 			errorRate = sumErrorRate / num;
@@ -732,7 +785,7 @@ void IISph::VF_constantVolumeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.acce_presure = (p_a.vel_adv - p_a.velocity) / m_TH.dt;
+			p_a.acce_presure = (p_a.advectionVelocity - p_a.velocity) / m_TH.dt;
 		}
 
 		//计算energy
@@ -743,8 +796,8 @@ void IISph::VF_constantVolumeSolver() {
 				m_TH.sum_energy = 0;
 				for (int i = 0; i < num; ++i) {
 					FluidPart& p_a = f_parts[i];
-					m_TH.potential_energy += p_a.fm0 * -m_TH.gravity_g[1] * (p_a.position[1] + 5);  // total potential energy
-					m_TH.kinetic_energy += 0.5 * p_a.fm0 * p_a.velocity.dot(p_a.velocity); //total kinetic energy
+					m_TH.potential_energy += p_a.mass * -m_TH.gravity_g[1] * (p_a.position[1] + 5);  // total potential energy
+					m_TH.kinetic_energy += 0.5 * p_a.mass * p_a.velocity.dot(p_a.velocity); //total kinetic energy
 				}
 				m_TH.sum_energy = m_TH.potential_energy + m_TH.kinetic_energy;
 				m_clog << setiosflags(ios::fixed);
@@ -778,8 +831,8 @@ void IISph::DF_constantDensitySolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i]; 
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.vel_adv = p_a.velocity + p_a.acce_adv * m_TH.dt;
+			p_a.restVolume = pow(p_a.d, vec_t::dim);
+			p_a.advectionVelocity = p_a.velocity + p_a.advectionAcceleration * m_TH.dt;
 		}
 
 		while (errorRate > errorRateGoal || currentIteration < minimumIteration) {
@@ -789,6 +842,67 @@ void IISph::DF_constantDensitySolver() {
 
 			real_t densitySum = 0;
 
+			for (int n_b = int(m_Solids.size()), k_b = 0; k_b < n_b; ++k_b) {
+
+				std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+				const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+
+				int b_num = int(b_parts.size());
+
+#pragma omp parallel for
+				for (int i = 0; i < b_num; ++i) {
+
+					BoundPart& p_a = b_parts[i];
+
+					vec_t grad = vec_t::O; //gradient
+					real_t gradScalar = 0; //gradient scalar version
+					real_t h = p_a.d;
+					p_a.advectionDensity = p_a.sphDensity;
+
+					const Neigb* neigbs = b_neigbs[i].neigs;
+					int n = b_neigbs[i].num;
+
+					for (int j = 0; j < n; ++j) {
+						if (neigbs[j].pidx.isFluid()) {
+							const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							if (m_TH.adjustDensity) {
+								p_a.advectionDensity += grad.dot(p_a.velocity - p_b.advectionVelocity) * p_a.mass * m_TH.dt;
+							}
+							else
+							{
+								p_a.advectionDensity += grad.dot(p_a.velocity - p_b.advectionVelocity) * p_b.mass * m_TH.dt;
+							}
+						}
+						else if (neigbs[j].pidx.isCandidate()) {
+							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_c.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.advectionDensity += grad.dot(p_a.velocity - p_c.velocity) * p_a.restDensity * p_c.volume * m_TH.dt;
+						}
+						else {
+							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.advectionDensity += grad.dot(p_a.velocity - p_b.velocity) * p_b.restDensity * p_b.volume * m_TH.dt;
+						}
+					}
+
+					if (p_a.advectionDensity < p_a.restDensity) { // when lack of neighbours, p_a should be regarded as restDensity
+						p_a.advectionDensity = p_a.restDensity;
+					}
+
+					p_a.DF_kappa = (p_a.advectionDensity - p_a.restDensity) / pow(m_TH.dt, 2) * p_a.DF_alpha;
+				}
+			}
+
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 
@@ -797,7 +911,7 @@ void IISph::DF_constantDensitySolver() {
 				vec_t grad = vec_t::O; //gradient
 				real_t gradScalar = 0; //gradient scalar version
 				real_t h = p_a.d;
-				p_a.density_adv = p_a.density;
+				p_a.advectionDensity = p_a.sphDensity;
 
 				const Neigb* neigbs = f_neigbs[i].neigs; 
 				int n = f_neigbs[i].num;
@@ -810,11 +924,11 @@ void IISph::DF_constantDensitySolver() {
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 						if (m_TH.adjustDensity) {
-							p_a.density_adv += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.fm0 * m_TH.dt;
+							p_a.advectionDensity += grad.dot(p_a.advectionVelocity - p_b.advectionVelocity) * p_a.mass * m_TH.dt;
 						}
 						else
 						{
-							p_a.density_adv += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_b.fm0 * m_TH.dt;
+							p_a.advectionDensity += grad.dot(p_a.advectionVelocity - p_b.advectionVelocity) * p_b.mass * m_TH.dt;
 						}
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
@@ -823,7 +937,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.density_adv += grad.dot(p_a.vel_adv - p_c.velocity) * p_a.rho0 * p_c.volume * m_TH.dt;
+						p_a.advectionDensity += grad.dot(p_a.advectionVelocity - p_c.velocity) * p_a.restDensity * p_c.volume * m_TH.dt;
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -831,22 +945,22 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.density_adv += grad.dot(p_a.vel_adv - p_b.velocity) * m_TH.boundaryDensity * p_b.volume * m_TH.dt;
+						p_a.advectionDensity += grad.dot(p_a.advectionVelocity - p_b.velocity) * m_TH.boundaryDensity * p_b.volume * m_TH.dt;
 					}
 				}
 
-				if (p_a.density_adv < p_a.rho0) { // when lack of neighbours, p_a should be regarded as restDensity
-					p_a.density_adv = p_a.rho0;
+				if (p_a.advectionDensity < p_a.restDensity) { // when lack of neighbours, p_a should be regarded as restDensity
+					p_a.advectionDensity = p_a.restDensity;
 				}
 
 #pragma omp critical
-				{ densitySum += (p_a.density_adv - p_a.rho0) / p_a.rho0; }
+				{ densitySum += (p_a.advectionDensity - p_a.restDensity) / p_a.restDensity; }
 			}
 
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
 				FluidPart& p_a = f_parts[i];
-				p_a.DF_kappa = (p_a.density_adv - p_a.rho0) / pow(m_TH.dt, 2) * p_a.DF_alpha;
+				p_a.DF_kappa = (p_a.advectionDensity - p_a.restDensity) / pow(m_TH.dt, 2) * p_a.DF_alpha;
 			}
 
 #pragma omp parallel for
@@ -866,7 +980,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DF_kappa / p_a.density) + (p_b.DF_kappa / p_b.density)) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_b.mass * ((p_a.DF_kappa / p_a.sphDensity) + (p_b.DF_kappa / p_b.sphDensity)) * m_TH.dt);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -874,7 +988,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DF_kappa / p_a.density)*2) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_a.restDensity * p_c.volume * ((p_a.DF_kappa / p_a.sphDensity)*2) * m_TH.dt);
 					}
 					else{
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -882,7 +996,7 @@ void IISph::DF_constantDensitySolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.boundaryDensity * p_b.volume * ((p_a.DF_kappa / p_a.density)*2) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_b.restDensity * p_b.volume * ((p_a.DF_kappa / p_a.sphDensity) + (p_b.DF_kappa / p_b.sphDensity)) * m_TH.dt);
 					}
 				}
 			}
@@ -894,7 +1008,7 @@ void IISph::DF_constantDensitySolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.acce_presure = (p_a.vel_adv - p_a.velocity) / m_TH.dt;
+			p_a.acce_presure = (p_a.advectionVelocity - p_a.velocity) / m_TH.dt;
 		}
 
 		//计算energy
@@ -905,8 +1019,8 @@ void IISph::DF_constantDensitySolver() {
 				m_TH.sum_energy = 0;
 				for (int i = 0; i < num; ++i) {
 					FluidPart& p_a = f_parts[i];
-					m_TH.potential_energy += p_a.fm0 * -m_TH.gravity_g[1] * (p_a.position[1] + 5);  // total potential energy
-					m_TH.kinetic_energy += 0.5 * p_a.fm0 * p_a.velocity.dot(p_a.velocity); //total kinetic energy
+					m_TH.potential_energy += p_a.mass * -m_TH.gravity_g[1] * (p_a.position[1] + 5);  // total potential energy
+					m_TH.kinetic_energy += 0.5 * p_a.mass * p_a.velocity.dot(p_a.velocity); //total kinetic energy
 				}
 				m_TH.sum_energy = m_TH.potential_energy + m_TH.kinetic_energy;
 				m_clog << setiosflags(ios::fixed);
@@ -940,8 +1054,8 @@ void IISph::DF_divergenceFreeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.vel_adv = p_a.velocity;
+			p_a.restVolume = pow(p_a.d, vec_t::dim);
+			p_a.advectionVelocity = p_a.velocity;
 		}
 
 		while (divergenceDeviationAver > errorRateGoal || currentIteration < minimumIteration) {
@@ -949,6 +1063,60 @@ void IISph::DF_divergenceFreeSolver() {
 			if (currentIteration > maximumIteration) break;
 			currentIteration++;
 			divergenceDeviationAver = 0;
+
+			for (int b_f = int(m_Solids.size()), k_b = 0; k_b < b_f; ++k_b) {
+
+				std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+				const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+
+				int b_num = int(b_parts.size());
+
+#pragma omp parallel for
+				for (int i = 0; i < b_num; ++i) {
+					BoundPart& p_a = b_parts[i];
+
+					vec_t grad = vec_t::O;
+					real_t gradScalar = 0;
+					real_t h = p_a.d;
+					p_a.DF_divergenceDeviation = 0;
+
+					/* neighbour<vec> and its size */
+					const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
+
+					for (int j = 0; j < n; ++j) {
+						if (neigbs[j].pidx.isFluid()) {
+							const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.DF_divergenceDeviation += grad.dot(p_a.velocity - p_b.advectionVelocity) * p_b.mass;
+						}
+						else if (neigbs[j].pidx.isCandidate()) {
+							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_c.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.DF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_c.velocity) * (p_a.restDensity * p_c.volume);
+						}
+						else {
+							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.DF_divergenceDeviation += grad.dot(p_a.velocity - p_b.velocity) * (p_b.restDensity * p_b.volume);
+						}
+					}
+
+					if (p_a.DF_divergenceDeviation < 0 || (p_a.sphDensity + p_a.DF_divergenceDeviation * m_TH.dt) < p_a.restDensity) {
+						p_a.DF_divergenceDeviation = 0;
+					}
+
+					p_a.DF_kappaV = p_a.DF_divergenceDeviation * p_a.DF_alpha / m_TH.dt;
+				}
+			}
 
 #pragma omp parallel for
 			for (int i = 0; i < num; ++i) {
@@ -969,7 +1137,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_b.fm0;
+						p_a.DF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_b.advectionVelocity) * p_b.mass;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -977,7 +1145,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * (p_a.rho0 * p_c.volume);
+						p_a.DF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_c.velocity) * (p_a.restDensity * p_c.volume);
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -985,11 +1153,11 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.DF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * (p_a.rho0 * p_b.volume);
+						p_a.DF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_b.velocity) * (p_a.restDensity * p_b.volume);
 					}
 				}
 
-				if (p_a.DF_divergenceDeviation < 0 || (p_a.density + p_a.DF_divergenceDeviation * m_TH.dt) < p_a.rho0) {
+				if (p_a.DF_divergenceDeviation < 0 || (p_a.sphDensity + p_a.DF_divergenceDeviation * m_TH.dt) < p_a.restDensity) {
 					p_a.DF_divergenceDeviation = 0;
 				}
 
@@ -1013,7 +1181,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_b.fm0 * ((p_a.DF_kappaV / p_a.density) + (p_b.DF_kappaV / p_b.density)) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_b.mass * ((p_a.DF_kappaV / p_a.sphDensity) + (p_b.DF_kappaV / p_b.sphDensity)) * m_TH.dt);
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -1021,7 +1189,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_c.volume * ((p_a.DF_kappaV / p_a.density)*2) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_a.restDensity * p_c.volume * ((p_a.DF_kappaV / p_a.sphDensity)*2) * m_TH.dt);
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -1029,7 +1197,7 @@ void IISph::DF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						p_a.vel_adv = p_a.vel_adv - (grad * p_a.rho0 * p_b.volume * ((p_a.DF_kappaV / p_a.density)*2) * m_TH.dt);
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * p_b.restDensity * p_b.volume * ((p_a.DF_kappaV / p_a.sphDensity) + (p_b.DF_kappaV / p_b.sphDensity)) * m_TH.dt);
 					}
 				}
 
@@ -1043,7 +1211,7 @@ void IISph::DF_divergenceFreeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.velocity = p_a.vel_adv;
+			p_a.velocity = p_a.advectionVelocity;
 		}
 	}
 }
@@ -1066,8 +1234,8 @@ void IISph::VF_divergenceFreeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.vel_adv = p_a.velocity;
+			p_a.restVolume = pow(p_a.d, vec_t::dim);
+			p_a.advectionVelocity = p_a.velocity;
 		}
 
 		while (divergenceDeviationAver > errorRateGoal || currentIteration < minimumIteration) {
@@ -1078,23 +1246,23 @@ void IISph::VF_divergenceFreeSolver() {
 			//cout << "divergenceDeviationAver: " << divergenceDeviationAver << endl;
 			divergenceDeviationAver = 0;
 
-			for (int n_s = int(m_Solids.size()), k_s = 0; k_s < n_s; ++k_s) {
+			for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
 
-				std::vector<BoundPart>& s_parts = m_Solids[k_s].boundaryParticles;
-				const std::vector<NeigbStr>& r_neigbs = mg_NeigbOfSolids[k_s];
-				int s_num = int(s_parts.size());
+				std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+				const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+				int num = int(b_parts.size());
 
 #pragma omp parallel for
-				for (int i = 0; i < s_num; ++i) {
+				for (int i = 0; i < num; ++i) {
 
-					BoundPart& p_a = s_parts[i];
+					BoundPart& p_a = b_parts[i];
 
 					vec_t grad = vec_t::O;
 					real_t gradScalar = 0;
 					real_t h = p_a.d;
 					p_a.VF_divergenceDeviation = 0;
 
-					const Neigb* neigbs = r_neigbs[i].neigs; int n = f_neigbs[i].num;
+					const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
 
 					for (int j = 0; j < n; ++j) {
 						if (neigbs[j].pidx.isFluid()) {
@@ -1103,8 +1271,7 @@ void IISph::VF_divergenceFreeSolver() {
 							gradScalar = -ker_W_grad(neigbs[j].dis, h);
 							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-							//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2);
-							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_b.vel_adv) * p_a.volume * p_b.volume;
+							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_b.advectionVelocity) * p_a.volume * p_b.restVolume;
 						}
 						else if (neigbs[j].pidx.isCandidate()) {
 							const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -1112,21 +1279,24 @@ void IISph::VF_divergenceFreeSolver() {
 							gradScalar = -ker_W_grad(neigbs[j].dis, h);
 							grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-							//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2);
 							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_c.velocity) * p_a.volume * p_c.volume;
 						}
 						else {
 							const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+							h = (p_a.d + p_b.d) / 2;
+							gradScalar = -ker_W_grad(neigbs[j].dis, h);
+							grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+							p_a.VF_divergenceDeviation += grad.dot(p_a.velocity - p_b.velocity) * p_a.volume * p_b.volume;
 						}
 					}
 
-					if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_volume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.volume) {
+					if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_sphVolume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.volume) {
 						p_a.VF_divergenceDeviation = 0;
 					}
 
 					p_a.VF_kappaV = p_a.VF_divergenceDeviation * p_a.VF_alpha / m_TH.dt / pow(p_a.volume, 3);
 				}
-
 			}
 
 #pragma omp parallel for
@@ -1149,7 +1319,7 @@ void IISph::VF_divergenceFreeSolver() {
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * pow(p_b.volume, 2);
-						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.vel_adv) * p_a.volume * p_b.volume;
+						p_a.VF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_b.advectionVelocity) * p_a.restVolume * p_b.restVolume;
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -1158,7 +1328,7 @@ void IISph::VF_divergenceFreeSolver() {
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * pow(p_c.volume, 2);
-						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_c.velocity) * p_a.volume * p_c.volume;
+						p_a.VF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_c.velocity) * p_a.restVolume * p_c.volume;
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -1167,15 +1337,63 @@ void IISph::VF_divergenceFreeSolver() {
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
 						//p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * pow(p_b.volume, 2);
-						p_a.VF_divergenceDeviation += grad.dot(p_a.vel_adv - p_b.velocity) * p_a.volume * p_b.volume;
+						p_a.VF_divergenceDeviation += grad.dot(p_a.advectionVelocity - p_b.velocity) * p_a.restVolume * p_b.volume;
 					}
 				}
 
-				if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_volume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.volume) {
+				if (p_a.VF_divergenceDeviation < 0 || (p_a.VF_sphVolume + p_a.VF_divergenceDeviation * m_TH.dt) < p_a.restVolume) {
 					p_a.VF_divergenceDeviation = 0;
 				}
 
-				p_a.VF_kappaV = p_a.VF_divergenceDeviation * p_a.VF_alpha / m_TH.dt / pow(p_a.volume, 3);
+				p_a.VF_kappaV = p_a.VF_divergenceDeviation * p_a.VF_alpha / m_TH.dt / pow(p_a.restVolume, 3);
+			}
+
+			//calculate force
+			for (int n_b = int(m_Solids.size()), k = 0; k < n_b; ++k) {
+				if (m_Solids[k].dynamic) {
+					if (m_Solids[k].type == Solid::RIGIDBODY) { // rigidbody
+						std::vector<BoundPart>& b_parts = m_Solids[k].boundaryParticles;
+						const std::vector<NeigbStr>& b_neigbs = mg_NeigbOfSolids[k];
+						int b_num = int(b_parts.size());
+
+#pragma omp parallel for
+						for (int i = 0; i < b_num; ++i) {
+							BoundPart& p_a = b_parts[i];
+							vec_t grad = vec_t::O;
+							real_t gradScalar = 0;
+							real_t h = p_a.d;
+
+							const Neigb* neigbs = b_neigbs[i].neigs; int n = b_neigbs[i].num;
+
+							for (int j = 0; j < n; ++j) {
+								if (neigbs[j].pidx.isFluid()) {
+									const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_b.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+									p_a.force = p_a.force - (grad * ((pow(p_a.volume, 2) * p_b.restVolume * p_a.VF_kappaV / p_a.VF_gamma)
+										+ (pow(p_b.restVolume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
+								}
+								else if (neigbs[j].pidx.isCandidate()) {
+									const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_c.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
+								}
+								else {
+									const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
+									h = (p_a.d + p_b.d) / 2;
+									gradScalar = -ker_W_grad(neigbs[j].dis, h);
+									grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
+
+									p_a.force = p_a.force - (grad * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma)
+										+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
+								}
+							}
+						}
+					}
+				}
 			}
 
 #pragma omp parallel for
@@ -1196,9 +1414,8 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 4) * p_a.VF_kappaV / p_a.VF_volume) + (pow(p_b.volume, 4) * p_b.VF_kappaV / p_b.VF_volume)));
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma) 
-							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass * ((pow(p_a.restVolume, 2) * p_b.restVolume * p_a.VF_kappaV / p_a.VF_gamma)
+							+ (pow(p_b.restVolume, 2) * p_a.restVolume * p_b.VF_kappaV / p_b.VF_gamma)));
 					}
 					else if (neigbs[j].pidx.isCandidate()) {
 						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
@@ -1206,8 +1423,7 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_c.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_c.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappaV / p_a.VF_volume) * 2);
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_c.volume * p_a.VF_kappaV / p_a.VF_gamma) * 2));
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass * ((pow(p_a.restVolume, 2) * p_c.volume * p_a.VF_kappaV / p_a.VF_gamma) * 2));
 					}
 					else {
 						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
@@ -1215,9 +1431,8 @@ void IISph::VF_divergenceFreeSolver() {
 						gradScalar = -ker_W_grad(neigbs[j].dis, h);
 						grad = (p_a.position - p_b.position) * (gradScalar / neigbs[j].dis);
 
-						//p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * (pow(p_b.volume, 2) * pow(p_a.volume, 2) * p_a.VF_kappaV / p_a.VF_volume) * 2);
-						p_a.vel_adv = p_a.vel_adv - (grad * m_TH.dt / p_a.fm0 * ((pow(p_a.volume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma) 
-							+ (pow(p_b.volume, 2) * p_a.volume * p_b.VF_kappaV / p_b.VF_gamma)));
+						p_a.advectionVelocity = p_a.advectionVelocity - (grad * m_TH.dt / p_a.mass * ((pow(p_a.restVolume, 2) * p_b.volume * p_a.VF_kappaV / p_a.VF_gamma) 
+							+ (pow(p_b.volume, 2) * p_a.restVolume * p_b.VF_kappaV / p_b.VF_gamma)));
 					}
 				}
 #pragma omp critical
@@ -1232,371 +1447,26 @@ void IISph::VF_divergenceFreeSolver() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.velocity = p_a.vel_adv;
+			p_a.velocity = p_a.advectionVelocity;
 		}
 	}
 }
-
-// compute fluid particles' pressure, WCSPH or PCISPH
-void IISph::ii_computePressure()
-{
-	//compute acce_adv;
-	ii_forceExceptPressure();
-
-	// foreach fluid
-	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
-		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
-		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
-		real_t rho0_ori = m_Fluids[k].restDensity_rho0;
-		//real_t fm0 = rho0 * v0;
-		//real_t wm0 = ker_W(0) * fm0;
-		real_t h = m_TH.h;
-		int num = int(f_parts.size());
-		// first loop for foreach particle 
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			FluidPart& p_a = f_parts[i];
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.rho0 = p_a.beta * rho0_ori;
-			p_a.fm0 = p_a.rho0 * p_a.volume;
-		}
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			vec_t tempValue1 = vec_t::O;
-			vec_t grad = vec_t::O;
-			vec_t ni = vec_t::O;
-			FluidPart& p_a = f_parts[i];
-			real_t wm0 = ker_W(0) * p_a.fm0;
-
-			real_t gamma = ker_W(0) * p_a.volume;
-			//real_t gamma_temp = ker_W(0) * v0 * temperatureCorrtedDensity(p_a.temperature);
-			real_t density = wm0;
-			real_t volume = ker_W(0) * pow(p_a.volume, 2);
-			real_t tempdensity = wm0;
-
-			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-			// forearch neighbour for computing rho
-			for (int j = 0; j < n; ++j) {
-				if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-					density += p_b.fm0 * ker_W(neigbs[j].dis);
-					tempdensity += p_b.fm0 * ker_W(neigbs[j].dis);
-					volume += pow(p_b.volume, 2) * ker_W(neigbs[j].dis);
-					gamma += p_b.volume * ker_W(neigbs[j].dis);
-				}
-				else if (neigbs[j].pidx.isCandidate()) { //see 11
-					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-					density += p_a.rho0 * p_c.volume * ker_W(neigbs[j].dis);
-					tempdensity += p_a.rho0 * p_c.volume * ker_W(neigbs[j].dis);
-					volume += p_c.volume * p_c.volume * ker_W(neigbs[j].dis);
-					gamma += p_c.volume * ker_W(neigbs[j].dis);
-				}
-				else { // boundary neighbour
-					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-					density += p_a.rho0 * p_b.volume * ker_W(neigbs[j].dis);
-					tempdensity += p_a.rho0 * p_b.volume * ker_W(neigbs[j].dis);
-					volume += p_b.volume * p_b.volume * ker_W(neigbs[j].dis);
-					gamma += p_b.volume * ker_W(neigbs[j].dis);
-				}
-			}
-
-			p_a.density = density;
-			p_a.volume = gamma;
-		}
-
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			vec_t tempValue1 = vec_t::O;
-			vec_t grad = vec_t::O;
-			vec_t ni = vec_t::O;
-			FluidPart& p_a = f_parts[i];
-			real_t rho0 = p_a.beta * rho0;
-			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-			// forearch neighbour for computing dii
-			for (int j = 0; j < n; ++j) {
-				grad = vec_t::O;
-				if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad * (-p_b.fm0 / (p_a.density * p_a.density));
-					//compute ni(表面张力)
-					ni += grad * (p_b.fm0 / p_b.density); // question
-				}
-				else if (neigbs[j].pidx.isCandidate()) {//see 11
-					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_c.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad * (-(rho0_ori * p_c.volume) / (p_a.density * p_a.density));
-				}
-				else { // boundary neighbour
-					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad * (-(rho0_ori * p_b.volume) / (p_a.density * p_a.density));
-				}
-			}
-			p_a.dii = tempValue1 * m_TH.dt * m_TH.dt;
-			ni = ni * m_TH.h;
-			p_a.n = ni;
-
-			//compute vel_adv
-			p_a.vel_adv = p_a.velocity + p_a.acce_adv * m_TH.dt;
-		}
-		real_t min_aii=-2;
-		real_t aii_dii = 0;
-		real_t aii_dji = 0;
-		// second loop for foreach particle 
-#pragma omp parallel for
-		for (int i = 0; i < num; ++i) {
-			real_t tempValue1 = 0;
-			real_t tempValue2 = 0;
-			vec_t grad = vec_t::O;
-			vec_t dji = vec_t::O;
-
-			FluidPart& p_a = f_parts[i];
-			real_t rho0 = p_a.beta * rho0_ori;
-			real_t fm0 = rho0 * p_a.volume;
-
-			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-			// forearch neighbour for computing rho_adv,aii
-			for (int j = 0; j < n; ++j) {
-				grad = vec_t::O;
-				dji = vec_t::O;
-				if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-					const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad.dot((p_a.vel_adv - p_b.vel_adv)) * p_b.volume * m_TH.dt;
-					dji = grad * (p_a.fm0 * m_TH.dt * m_TH.dt / (p_a.density * p_a.density));
-					tempValue2 += (p_a.dii - dji).dot(grad) * p_b.fm0;
-
-				}
-				else if (neigbs[j].pidx.isCandidate()) {//see 11
-					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_c.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad.dot((p_a.vel_adv - p_c.velocity)) * (p_c.volume) * m_TH.dt;
-					// dji = grad * (rho0 * p_c.volume * m_TH.dt * m_TH.dt / (p_a.density * p_a.density));
-					tempValue2 += (p_a.dii - dji).dot(grad) * (p_c.volume * rho0_ori);
-				}
-				else { // boundary neighbour
-					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-					grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-					tempValue1 += grad.dot((p_a.vel_adv - p_b.velocity)) * (p_b.volume) * m_TH.dt;
-					// dji = grad * (rho0 * p_b.volume * m_TH.dt * m_TH.dt / (p_a.density * p_a.density));
-					tempValue2 += (p_a.dii - dji).dot(grad) * (p_b.volume * rho0_ori);
-				}
-			}
-			if (tempValue2 == 0) { tempValue2 = -1e-15; }
-			p_a.aii = tempValue2/rho0;
-			p_a.vol_adv = p_a.volume + tempValue1;
-			p_a.p_l = 0;
-#pragma omp critical
-			{
-				if (p_a.aii > 0) {
-					min_aii = p_a.aii;
-					aii_dii = 0;
-					aii_dji = 0;
-					for (int j = 0; j < n; ++j) {
-						grad = vec_t::O;
-						dji = vec_t::O;
-						if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-							const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-							grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-							tempValue1 += grad.dot((p_a.vel_adv - p_b.vel_adv)) * p_b.volume * m_TH.dt;
-							dji = grad * (p_a.fm0 * m_TH.dt * m_TH.dt / (p_a.density * p_a.density));
-							aii_dii += (p_a.dii).dot(grad) * p_b.fm0 / rho0;
-							aii_dji += (- dji).dot(grad) * p_b.fm0 / rho0;
-						}
-					}
-				}
-			}
-		}
-		//cout << "positive aii: " << min_aii << endl;
-		//cout << "dii part: " << aii_dii << " dji part: " << aii_dji << endl;
-
-		//pressure slover
-		int l = 0;
-		real_t averageVolumeError = 1e10;
-		real_t sumVolume = 0;
-		long nbParticlesInSummation = 0;
-		double eta = 0.001;
-		int maxIter = 5000;
-		while ((averageVolumeError > eta || l < 3)) {
-			if (l > maxIter) break;
-
-			// third loop for foreach particle
-#pragma omp parallel for
-			for (int i = 0; i < num; ++i) {
-				vec_t tempValue1 = vec_t::O;
-				vec_t grad = vec_t::O;
-
-				FluidPart& p_a = f_parts[i];
-				real_t rho0 = p_a.beta * rho0_ori;
-				real_t fm0 = rho0 * p_a.volume;
-
-				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-				// forearch neighbour 
-				for (int j = 0; j < n; ++j) {
-					grad = vec_t::O;
-					if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-						const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-						grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-						tempValue1 += grad * (-(p_b.fm0 * p_b.p_l) / (p_b.density * p_b.density));
-					}
-					else if (neigbs[j].pidx.isCandidate()) {//see 11
-						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-						// tempValue1 += grad * (-(rho0 * p_c.volume * p_a.p_l) / (p_a.density * p_a.density)); 
-					}
-					else { // boundary neighbour
-						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-						// tempValue1 += grad * (-(rho0 * p_b.volume * p_a.p_l) / (p_a.density * p_a.density)); 
-					}
-				}
-				p_a.sum_dijpj = tempValue1 * (m_TH.dt * m_TH.dt);
-			}
-			real_t maxPressure = 0;
-			real_t maxBeta = 2;
-			real_t probeAii = 0;
-			// fourth loop for foreach particle
-#pragma omp parallel for
-			for (int i = 0; i < num; ++i) {
-				vec_t grad = vec_t::O;
-				vec_t tempValue1 = vec_t::O;
-				real_t finalterm = 0;
-				real_t t = 0;
-
-				FluidPart& p_a = f_parts[i];
-				real_t rho0 = p_a.beta * rho0_ori;
-				real_t fm0 = rho0 * p_a.volume;
-
-				const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
-				// forearch neighbour 
-				for (int j = 0; j < n; ++j) {
-					vec_t dji = vec_t::O;
-					grad = vec_t::O;
-					tempValue1 = vec_t::O;
-					if (neigbs[j].pidx.isFluid()) { // fluid neighbour
-						const FluidPart& p_b = getFluidPartOfIdx(neigbs[j].pidx);
-						grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-						dji = grad * m_TH.dt * m_TH.dt * p_a.fm0 / (p_a.density * p_a.density);
-						tempValue1 = (p_a.sum_dijpj - p_b.dii * p_b.p_l) - (p_b.sum_dijpj - dji * p_a.p_l);
-						finalterm += (p_b.fm0 * tempValue1.dot(grad));
-
-					}
-					else if (neigbs[j].pidx.isCandidate()) {//see 11
-						const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
-						grad = (p_a.position - p_c.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-						// dji = grad * m_TH.dt * m_TH.dt * p_a.fm0 / (p_a.density * p_a.density);
-						tempValue1 = (p_a.sum_dijpj);
-						finalterm += (p_c.volume * rho0_ori * tempValue1.dot(grad));
-					}
-					else { // boundary neighbour
-						const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
-						grad = (p_a.position - p_b.position) * (-ker_W_grad(neigbs[j].dis) / neigbs[j].dis);
-						// dji = grad * m_TH.dt * m_TH.dt * p_a.fm0 / (p_a.density * p_a.density);
-						tempValue1 = (p_a.sum_dijpj);
-						finalterm += (p_b.volume * rho0_ori * tempValue1.dot(grad));
-					}
-				}
-				finalterm = finalterm / rho0;
-				t = 0.5 * p_a.p_l + (0.5 / p_a.aii) * (1 - p_a.vol_adv - finalterm);
-				if (t < 0) {
-					t = 0;
-				}
-				else {
-					real_t singleVolume = p_a.vol_adv + p_a.aii * p_a.p_l + finalterm;
-#pragma omp critical
-					{
-						//sumDensities += sumDensities;
-						if (p_a.vol_adv - 1 > 0) {
-							sumVolume += singleVolume;
-							++nbParticlesInSummation;
-						}
-					}
-				}
-				p_a.presure = t;
-				if (maxPressure < t) { maxPressure = t; maxBeta = p_a.beta; probeAii = p_a.aii; }
-			}
-			//cout << "max pressure: " << maxPressure << " and beta: " << maxBeta << endl;
-			//cout << "and it's aii: " << probeAii << endl;
-#pragma omp parallel for
-			for (int i = 0; i < num; ++i) {
-				FluidPart& p_a = f_parts[i];
-				p_a.p_l = p_a.presure;
-			}
-
-			l = l + 1;
-			if (nbParticlesInSummation > 0) {
-				averageVolumeError = ((sumVolume / nbParticlesInSummation) - 1);
-				nbParticlesInSummation = 0;
-				sumVolume = 0;
-			}
-			else {
-				averageVolumeError = 0.0;
-			}
-			//cout << "averageVolumeError: " << averageVolumeError << endl;
-		}
-		// cout << "averageVolumeError: " << averageVolumeError << endl;
-		//cout << "numIter: " << l << endl << endl;
-	}
-}
-
 
 // paritlce-particle interaction, [Mon92], [BT07]
-inline void IISph::ii_fluidPartForceExceptPressure_fsame(
-	FluidPart& fa, const FluidPart& fb, const real_t& dis,
-	const real_t& fm0, const real_t& alpha, const real_t& gamma, const real_t& frho0)
+inline void IISph::f2fAdvection(
+	FluidPart& fa, const FluidPart& fb, const real_t& dis)
 {
 	if (dis == 0) { ++m_EC.zeroDis; return; }
 	vec_t xab = fa.position - fb.position;
 	real_t h = (fa.d + fb.d) / 2;
-	real_t grad = -ker_W_grad(dis, h) / dis;
-	real_t acce = 0;
-	real_t dis2;
-	dis2 = dis;
+	vec_t grad = -xab * ker_W_grad(dis, h) / dis;
+	
+
 	// viscosity
+	real_t kinematicViscosity = (fa.kinematicViscosity + fb.kinematicViscosity) / 2;
 	real_t pro = (fa.velocity - fb.velocity).dot(xab);
-	//if (pro < 0) {
-	//	real_t nu = 2 * alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.density + fb.density);
-	//	real_t pi = -nu * pro / (dis2 * dis2 + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
-	//	acce += -ker_W_grad(dis2) / dis2 * (-fb.fm0 * pi);	
-	//	//cout << "acce_f: " << acce << endl;
-	//}
-	//if (acce) { xab *= acce / dis2; fa.acce_adv += xab; }
-	//if (pro < 0) {
-		acce = 2 * alpha * (vec_t::dim + 2) * (fb.volume / fb.VF_gamma) * pro / (dis2 * dis2 + 1e-6) * grad;
-		//	cout << "acce_f: " << acce << endl;
-	//}
-	if (acce) { xab *= acce; fa.acce_adv += xab; }
-
-	// surface tension
-	if (m_TH.applyCohesion) {
-		// surface tension
-		real_t h = m_TH.h;
-		real_t r = m_TH.r;
-		//compute cohesion
-		vec_t xab_coh = fa.position - fb.position;
-		double pai = 3.14;
-		real_t Kij = (fa.rho0 + fb.rho0) / (fa.density + fb.density);
-		real_t C = 0;
-		if (2 * dis2 > m_TH.h&& dis2 <= m_TH.h) {
-			C = (32 / (pai * pow(m_TH.h, 9))) * pow(m_TH.h - dis2, 3) * pow(dis2, 3);
-		}
-		else if (dis2 > 0 && 2 * dis2 <= m_TH.h) {
-			C = (32 / (pai * pow(m_TH.h, 9))) * (2 * pow(m_TH.h - dis2, 3) * pow(dis2, 3) - pow(m_TH.h, 6) / 64);
-		}
-		else {
-			C = 0;
-		}
-
-		real_t acce_coh = -r * fb.fm0 * C / dis2;
-		xab_coh *= acce_coh;
-
-		//compute curvature
-		real_t acce_cur = -m_TH.r;
-		vec_t xab_cur = fa.n - fb.n;
-		xab_cur *= acce_cur;
-
-		vec_t acce_st = (xab_coh) * Kij;
-		fa.acce_adv += acce_st;
-	}
+	vec_t viscosityAcceleration = grad * 2 * (vec_t::dim + 2) * kinematicViscosity * (fb.restVolume / fb.VF_gamma) * pro / (dis * dis + 1e-6);
+	fa.advectionAcceleration += viscosityAcceleration;
 }
 
 // multiphase fluid, [SP08]
@@ -1611,67 +1481,38 @@ inline void IISph::ii_fluidPartForceExceptPressure_fdiff(
 	// viscosity
 	real_t pro = (fa.velocity - fb.velocity).dot(xab);
 	if (pro < 0) {
-		real_t nu = 2 * alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.density + fb.density);
+		real_t nu = 2 * alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.sphDensity + fb.sphDensity);
 		real_t pi = -nu * pro / (dis * dis + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
 		acce += grad * (-(fma + fmb) / 2 * pi);
 	}
-	if (acce) { xab *= acce; fa.acce_adv += xab; }
+	if (acce) { xab *= acce; fa.advectionAcceleration += xab; }
 
 }
 
 // fluid-rigid coupling, [AIS*12]
-inline void IISph::ii_fluidPartForceExceptPressure_bound(
-	FluidPart& fa, const BoundPart& rb, const real_t& dis,
-	const real_t& frho0, const real_t& r_alpha)
+inline void IISph::b2fAdvection(
+	FluidPart& fa, const BoundPart& rb, const real_t& dis)
 {
 	if (dis == 0) { ++m_EC.zeroDis; return; }
 	vec_t xab = fa.position - rb.position;
 	real_t h = (fa.d + rb.d) / 2;
-	real_t grad = -ker_W_grad(dis, h) / dis;
-	real_t acce = 0;
+	vec_t grad = -xab * ker_W_grad(dis, h) / dis;
+
 	// viscosity
+	real_t kinematicViscosity = (fa.kinematicViscosity + rb.kinematicViscosity) / 2;
 	real_t pro = (fa.velocity - rb.velocity).dot(xab);
-	//if (pro < 0) {
-	//	real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.density * 2);
-	//	real_t pi = -nu * pro / (dis * dis + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
-	//	acce += grad * (-frho0 * rb.volume * pi);
-	//	//cout << "acce_b: " << acce << endl;
-	//}
-	//if (acce) { xab *= acce; fa.acce_adv += xab; }
-	//if (pro < 0) {
-		acce = 2 * r_alpha * (vec_t::dim + 2) * (rb.volume / rb.VF_gamma) * pro / (dis * dis + 1e-6) * grad;
-		//cout << "acce: " << acce << endl;
-	//}
-	if (acce) { xab *= acce; fa.acce_adv += xab; }
-
-	if (m_TH.applyAdhesion) {
-		// surface tension & adhesion
-		real_t bt = 1;
-		real_t h = m_TH.h;
-		real_t A = 0;
-		vec_t xab_adh = fa.position - rb.position;
-
-		if (2 * dis > m_TH.h&& dis <= m_TH.h) {
-			A = 0.007 / (pow(m_TH.h, 13 / 4)) * pow((-4 * dis * dis / m_TH.h + 6 * dis - 2 * m_TH.h), 1 / 4);
-		}
-		else {
-			A = 0;
-		}
-		real_t acce_adh = -m_TH.bt * fa.rho0 * rb.volume * A / dis;
-		xab_adh *= acce_adh;
-		fa.acce_adv += xab_adh;
-	}
+	vec_t viscosityAcceleration = grad * 2 * (vec_t::dim + 2) * kinematicViscosity * (rb.volume / rb.VF_gamma) * pro / (dis * dis + 1e-6);
+	fa.advectionAcceleration += viscosityAcceleration;
 }
 
 //see 11
 
 
-void IISph::ii_forceExceptPressure() {
+void IISph::advectionStep() {
 	// foreach fluid
 	for (int n_f = int(m_Fluids.size()), k = 0; k < n_f; ++k) {
 		std::vector<FluidPart>& f_parts = m_Fluids[k].fluidParticles;
 		const std::vector<NeigbStr>& f_neigbs = mg_NeigbOfFluids[k];
-		real_t rho0_ori = m_Fluids[k].restDensity_rho0;
 		//real_t fm0 = rho0 * v0;
 		real_t alpha = m_Fluids[k].viscosity_alpha;
 		real_t gamma = m_Fluids[k].surfaceTension_gamma;
@@ -1680,11 +1521,8 @@ void IISph::ii_forceExceptPressure() {
 #pragma omp parallel for
 		for (int i = 0; i < num; ++i) {
 			FluidPart& p_a = f_parts[i];
-			p_a.volume = pow(p_a.d, vec_t::dim);
-			p_a.rho0 = p_a.beta * rho0_ori;
-			p_a.fm0 = p_a.rho0 * p_a.volume;
 			p_a.presure = 0;
-			p_a.acce_adv = m_TH.gravity_g;
+			p_a.advectionAcceleration += m_TH.gravity_g;
 		}
 
 #pragma omp parallel for
@@ -1699,16 +1537,15 @@ void IISph::ii_forceExceptPressure() {
 					int idx_b = neigbs[j].pidx.toFluidI();
 					if (idx_b == k) {
 						// the same fluid
-						ii_fluidPartForceExceptPressure_fsame(
-							p_a, p_b, neigbs[j].dis, p_a.fm0, alpha, gamma, p_a.rho0);
+						f2fAdvection(p_a, p_b, neigbs[j].dis);
 					}
 					else {
 						// different fluid
 						//注：这里的p_a.volums是错误的，之后用到different fluid再改
-						real_t fmb = p_a.volume * m_Fluids[idx_b].restDensity_rho0;
+						real_t fmb = p_a.restVolume * m_Fluids[idx_b].restDensity_rho0;
 						real_t b_alpha = m_Fluids[idx_b].viscosity_alpha;
 						ii_fluidPartForceExceptPressure_fdiff(
-							p_a, p_b, neigbs[j].dis, p_a.fm0, fmb, (alpha + b_alpha) / 2);
+							p_a, p_b, neigbs[j].dis, p_a.mass, fmb, (alpha + b_alpha) / 2);
 
 					}
 				}
@@ -1716,14 +1553,13 @@ void IISph::ii_forceExceptPressure() {
 					const CandidatePart& p_c = getCandidatePartOfIdx(neigbs[j].pidx);
 					int idx_c = neigbs[j].pidx.toCandidateI();
 					real_t r_alpha = m_Candidates[idx_c].viscosity_alpha;
-					computeForceFromCandidateToFluidExceptPressure(p_a, p_c, neigbs[j].dis, p_a.rho0, r_alpha);
+					computeForceFromCandidateToFluidExceptPressure(p_a, p_c, neigbs[j].dis, p_a.restDensity, r_alpha);
 				}
 				else { // boundary neighbour
 					const BoundPart& p_b = getBoundPartOfIdx(neigbs[j].pidx);
 					int idx_b = neigbs[j].pidx.toSolidI();
 					real_t r_alpha = m_Solids[idx_b].viscosity_alpha;
-					ii_fluidPartForceExceptPressure_bound(
-						p_a, p_b, neigbs[j].dis, p_a.rho0, r_alpha);
+					b2fAdvection(p_a, p_b, neigbs[j].dis);
 				}
 			}
 		}
@@ -1742,7 +1578,7 @@ inline void IISph::ii_fluidPartForcePressure_fsame(
 	real_t grad = -ker_W_grad(dis) / dis;
 	// momentum
 	real_t acce = grad
-		* (-fb.fm0 * (fa.presure / (fa.density * fa.density) + fb.presure / (fb.density * fb.density)));
+		* (-fb.mass * (fa.presure / (fa.sphDensity * fa.sphDensity) + fb.presure / (fb.sphDensity * fb.sphDensity)));
 	xab *= acce; fa.acce_presure += xab;
 }
 
@@ -1754,7 +1590,7 @@ inline void IISph::ii_fluidPartForcePressure_fdiff(
 	if (dis == 0) { ++m_EC.zeroDis; return; }
 	vec_t xab = fa.position - fb.position;
 	real_t grad = -ker_W_grad(dis) / dis;
-	real_t dalta_a = fa.density / fma, dalta_b = fb.density / fmb;
+	real_t dalta_a = fa.sphDensity / fma, dalta_b = fb.sphDensity / fmb;
 	// momentum
 	real_t acce = grad
 		* (-1 / fma * (fa.presure / (dalta_a * dalta_a) + fb.presure / (dalta_b * dalta_b)));
@@ -1771,7 +1607,7 @@ inline void IISph::ii_fluidPartForcePressure_bound(
 	real_t grad = -ker_W_grad(dis) / dis, acce = 0;
 	// momentum
 	if (fa.presure > 0) {
-		acce += grad * (-frho0 * rb.volume * (fa.presure / (fa.density * fa.density) * 2));
+		acce += grad * (-frho0 * rb.volume * (fa.presure / (fa.sphDensity * fa.sphDensity) * 2));
 	}
 	xab *= acce; fa.acce_presure += xab;
 }
@@ -1792,11 +1628,11 @@ void IISph::computeForceFromCandidateToFluidExceptPressure(FluidPart& fa, const 
 	// viscosity
 	real_t pro = (fa.velocity - cb.velocity).dot(xab);
 	if (pro < 0) {
-		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.density * 2);
+		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fa.sphDensity * 2);
 		real_t pi = -nu * pro / (dis * dis + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
 		acce += grad * (-frho0 * cb.volume * pi);
 	}
-	if (acce) { xab *= acce; fa.acce_adv += xab; }
+	if (acce) { xab *= acce; fa.advectionAcceleration += xab; }
 	// surface tension & adhesion
 	if (m_TH.applyAdhesion) {
 		real_t bt = 1;
@@ -1824,7 +1660,7 @@ void IISph::computeForceFromCandidateToFluid(FluidPart& fa, const CandidatePart&
 	real_t grad = -ker_W_grad(dis) / dis, acce = 0;
 	// momentum
 	if (fa.presure > 0)
-		acce += grad * (-frho0 * cb.volume * (fa.presure / (fa.density * fa.density) * 2));
+		acce += grad * (-frho0 * cb.volume * (fa.presure / (fa.sphDensity * fa.sphDensity) * 2));
 	xab *= acce; fa.acce_presure += xab;
 }
 
@@ -1837,12 +1673,12 @@ void IISph::computeForceFromFluidToCandidate(CandidatePart& ca, const FluidPart&
 	real_t grad = -ker_W_grad(dis) / dis, force = 0;
 	// momentum
 	if (fb.presure > 0)
-		force += grad * (-fm0 * frho0 * ca.volume * (fb.presure / (fb.density * fb.density) * 2));
+		force += grad * (-fm0 * frho0 * ca.volume * (fb.presure / (fb.sphDensity * fb.sphDensity) * 2));
 	// viscosity
 
 	real_t pro = (ca.velocity - fb.velocity).dot(xab);
 	if (pro < 0) {
-		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fb.density * 2);
+		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fb.sphDensity * 2);
 		real_t pi =
 			-nu * pro / (dis * dis + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
 		force += grad * (-fm0 * frho0 * ca.volume * pi);
@@ -1909,11 +1745,11 @@ inline void IISph::ii_boundPartForcePressure_f(
 	real_t grad = -ker_W_grad(dis) / dis, force = 0;
 	// momentum
 	if (fb.presure > 0)
-		force += grad * (-fm0 * frho0 * ra.volume * (fb.presure / (fb.density * fb.density) * 2));
+		force += grad * (-fm0 * frho0 * ra.volume * (fb.presure / (fb.sphDensity * fb.sphDensity) * 2));
 	// viscosity
 	real_t pro = (ra.velocity - fb.velocity).dot(xab);
 	if (pro < 0) {
-		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fb.density * 2);
+		real_t nu = 2 * r_alpha * m_TH.smoothRadius_h * m_TH.soundSpeed_cs / (fb.sphDensity * 2);
 		real_t pi =
 			-nu * pro / (dis * dis + real_t(0.01) * m_TH.smoothRadius_h * m_TH.smoothRadius_h);
 		force += grad * (-fm0 * frho0 * ra.volume * pi);
@@ -1941,7 +1777,7 @@ void IISph::ii_computeForcePressure()
 
 			real_t rho0 = p_a.beta * rho0_ori;
 			real_t fm0 = rho0 * v0;
-			p_a.acce_presure = p_a.acce_adv;
+			p_a.acce_presure = p_a.advectionAcceleration;
 			
 			const Neigb* neigbs = f_neigbs[i].neigs; int n = f_neigbs[i].num;
 			// forearch neighbour

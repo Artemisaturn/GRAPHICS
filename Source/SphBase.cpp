@@ -656,7 +656,7 @@ void SphBase::updateTemperature() {
 					FluidPart fp;
 					fp.position = cParts[k].position;
 					fp.velocity = cParts[k].velocity;
-					fp.density = m_Fluids[(m_Candidates[i].fluidIdx)].restDensity_rho0;
+					fp.restDensity = m_Fluids[(m_Candidates[i].fluidIdx)].restDensity_rho0;
 					fp.temperature = cParts[k].temperature;
 					fp.temperatureNext = cParts[k].temperatureNext;
 					fp.beta = 1;
@@ -678,7 +678,7 @@ void SphBase::updateTemperature() {
 				fp.position = cParts[k].position;
 				//fp.velocity = cParts[k].velocity;
 				fp.velocity = vec_t(0, 0, 0);
-				fp.density = m_Fluids[(m_Candidates[i].fluidIdx)].restDensity_rho0;
+				fp.restDensity = m_Fluids[(m_Candidates[i].fluidIdx)].restDensity_rho0;
 				fp.temperature = cParts[k].temperature;
 				fp.temperatureNext = cParts[k].temperatureNext;
 				fParts.push_back(fp);

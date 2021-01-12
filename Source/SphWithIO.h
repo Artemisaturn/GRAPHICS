@@ -61,6 +61,7 @@ public:
 	// parameter test use to select particles, i.e., cut down some particles
 	void oglDrawFluidParts(void(*draw1)(), void(*draw2)(), bool(*test)(const vec_t& p)=0) const;
 	void oglDrawBounParts(void(*draw)(), bool(*test)(const vec_t& p)=0) const;
+	void oglDrawBounParts(void(*draw)(), size_t start, bool(*test)(const vec_t& p) = 0)  const;
 	void oglDrawCandidateParts(void(*draw)(), bool(*test)(const vec_t& p) = 0) const;//see 9
 	void oglDrawSolid(int ridx) const;
 	void oglDrawSolid(bool(*test)(int i)=0) const;

@@ -14,7 +14,7 @@
 mySPH sphDemo; // the global object of sph class
 
 
-bool fluid_system_run = false, draw_pos = true, draw_boun = true;
+bool fluid_system_run = false, draw_pos = true, draw_boun = true, draw_container = true;
 bool boun_mode = true;
 bool write_file = false;
 bool draw_frame = true;
@@ -25,6 +25,7 @@ bool draw_candidate = true;//see 9
 
 void key_r() { fluid_system_run = !fluid_system_run; PRINT_BOOL(fluid_system_run); }
 void key_b() { draw_boun = !draw_boun; PRINT_BOOL(draw_boun); }
+void key_n() { draw_container = !draw_container; PRINT_BOOL(draw_container); }
 void key_f() { draw_pos = !draw_pos; PRINT_BOOL(draw_pos); }
 void key_m() { boun_mode = !boun_mode; PRINT_BOOL(boun_mode); }
 void key_w() { write_file = !write_file; PRINT_BOOL(write_file); }
@@ -178,20 +179,21 @@ void run_and_draw()
 	//}
 
 	if (draw_boun) {
+		size_t start = draw_container ? 0 : 1;
 		float c[4] = { 0,1,0.8f, 1 };
 		glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, c);
 		if (boun_mode) {
 			//sphDemo.oglDrawSolid();
-			for (size_t i = 0; i < sphDemo.getNumSolids(); ++i) {
+			for (size_t i = start; i < sphDemo.getNumSolids(); ++i) {
 				glStaff::hsl_to_rgb(float(i) / sphDemo.getNumSolids() * 330 + 30, 1, 0.5f, c);
 				glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, c);
 				sphDemo.oglDrawSolid(int(i));
 			}
 		}
 		else {
-			for (size_t i = 0; i < sphDemo.getNumSolids(); ++i)
+			for (size_t i = start; i < sphDemo.getNumSolids(); ++i)
 				sphDemo.setBoundPartsColor(int(i), colorFunc_b);
-			sphDemo.oglDrawBounParts(draw_unitsphere1);
+			sphDemo.oglDrawBounParts(draw_unitsphere1, start);
 		}
 	}
 
@@ -332,6 +334,7 @@ int main(int argc, char** argv)
 
 	glStaff::add_key_callback('R', key_r, L"run sph");
 	glStaff::add_key_callback('B', key_b, L"boundary particle");
+	glStaff::add_key_callback('N', key_n, L"boundary particle (only container)");
 	glStaff::add_key_callback('F', key_f, L"fluid particle");
 	glStaff::add_key_callback('M', key_m, L"boundary mode");
 	glStaff::add_key_callback('W', key_w, L"save pos continuously every video frame");

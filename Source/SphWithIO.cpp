@@ -63,8 +63,27 @@ void SphWithIO::oglDrawBounParts( void(*draw)(), bool(*test)(const vec_t& p) )  
 			glPopMatrix();
 		}
 	}
-
 }
+
+void SphWithIO::oglDrawBounParts(void(*draw)(), size_t start, bool(*test)(const vec_t& p))  const
+{
+	assert(draw != 0);
+
+	for (int num = int(m_Solids.size()), k = start; k < num; ++k) {
+		const std::vector<BoundPart>& r_pts = m_Solids[k].boundaryParticles;
+		for (int n = int(r_pts.size()), i = 0; i < n; ++i) {
+			const vec_t& p = r_pts[i].position;
+			if (test != 0 && test(p) == false) continue;
+			glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, r_pts[i].color);
+			glPushMatrix();
+			glTranslatef((float)p[0], (float)p[1], vec_t::dim == 3 ? (float)p[2] : 0);
+			//draw();
+			glutSolidSphere(r_pts[i].d / 2, 10, 10);
+			glPopMatrix();
+		}
+	}
+}
+
 //see 9
 void SphWithIO::oglDrawCandidateParts(void(*draw)(), bool(*test)(const vec_t& p)) const {
 	assert(draw != 0);

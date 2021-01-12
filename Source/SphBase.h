@@ -52,13 +52,23 @@ typedef vec_dim<vec_t::dim,int_t>::T veci_t; // corresponds to vec_t's dimention
  * ----- fluid and solid --------------------------------------------------------------------------
 */
 
+class MT_FluidPhase {
+public:
+    MT_FluidPhase(real_t restDensity, real_t kinematic_viscosity, std::vector<real_t> rgba) :
+        MT_restDensity(MT_restDensity), MT_kinematic_viscosity(MT_kinematic_viscosity), rgba(rgba) {};
+
+    real_t MT_restDensity;
+    real_t MT_kinematic_viscosity;
+    std::vector<real_t> rgba = { 0,0,0,0 };
+};
+
 // basic particle class
 class Particle {
 public:
     vec_t position;	// position
     vec_t velocity;	// velocity
-	vec_t vel_adv; //for iisph
-	vec_t acce_adv;//for iisph
+	vec_t advectionVelocity; //for iisph
+	vec_t advectionAcceleration;//for iisph
 	vec_t acce_presure;
 	vec_t dii;//for iisph
 	vec_t sum_dijpj;//for iisph
@@ -66,38 +76,28 @@ public:
 	real_t aii;//for iisph
 	real_t rho_adv;//for iisph
 	real_t p_l;//for iisph
-    real_t volume;
     real_t vol_adv;
 	real_t temperature;//see 12
 	real_t temperatureNext;//see 12
     float color[4];	// RGBA color
     real_t d; //diameter
-    real_t VF_gamma = 1;
-    real_t VF_alpha;
-    vec_t VF_alpha1;
-    real_t VF_alpha2;
-    real_t VF_alpha3;
-    real_t VF_alpha4;
-    real_t VF_kappa;
-    real_t VF_kappaV;
-    real_t VF_volume;
-    real_t VF_volume_adv;
-    real_t VF_divergenceDeviation;
 };
 
 // fluid particle
 class FluidParticle : public Particle {
 public:
     int i_color; // 1 blue; 2 red
-    real_t density;		// density of particle
-    real_t density_adv;
+
+    real_t restVolume;
+    real_t sphDensity;		// density of particle
+    real_t advectionDensity;
+    real_t restDensity;
     real_t presure;		// WCSPH or PCISPH
     vec_t acceleration;	// acceleration
-    real_t tempvolume;
-    real_t fm0;
-    real_t rho0;
+    real_t mass;
     real_t beta;
     real_t temp_beta;
+    real_t kinematicViscosity = 0.1;
 
     real_t DF_alpha;
     vec_t DF_alpha1;
@@ -105,6 +105,16 @@ public:
     real_t DF_kappa;
     real_t DF_kappaV;
     real_t DF_divergenceDeviation;
+
+    real_t VF_gamma;
+    real_t VF_sphVolume;
+    real_t VF_advectionVolume;
+    real_t VF_alpha;
+    vec_t VF_alpha1;
+    real_t VF_alpha2;
+    real_t VF_kappa;
+    real_t VF_kappaV;
+    real_t VF_divergenceDeviation;
 
     std::vector<real_t> MT_restVolumeFraction;
     std::vector<real_t> MT_volumeFraction;
@@ -115,10 +125,8 @@ public:
     std::vector<vec_t> MT_interfacialMomentum;
     std::vector<vec_t> MT_driftVelocity;
     std::vector<vec_t> MT_phaseVelocity;
-    
-    vec_t MT_pressureAcceleration;
 
-    real_t MT_Beta;
+    real_t MT_beta;
     real_t MT_theta;
 
 #ifdef WC_TIMEADAPTIVE
@@ -165,6 +173,29 @@ public:
 	// for softbody, kerSumFromSelf=0
     real_t kerSumFromSelf;
     vec_t force;
+    real_t restDensity;
+    real_t sphDensity;
+    real_t mass;
+    real_t advectionDensity;
+
+    real_t kinematicViscosity = 0.1;
+
+    real_t VF_gamma;
+    real_t VF_sphVolume;
+    real_t VF_advectionVolume;
+    real_t VF_alpha;
+    vec_t VF_alpha1;
+    real_t VF_alpha2;
+    real_t VF_kappa;
+    real_t VF_kappaV;
+    real_t VF_divergenceDeviation;
+
+    real_t DF_alpha;
+    vec_t DF_alpha1;
+    real_t DF_alpha2;
+    real_t DF_kappa;
+    real_t DF_kappaV;
+    real_t DF_divergenceDeviation;
 };
 
 //see 9

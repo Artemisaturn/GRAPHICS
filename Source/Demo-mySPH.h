@@ -61,8 +61,18 @@ public:
 			bp0.position = bp0.velocity = bp0.force = vec_t::O;
 			vec_t rb(4.0f); rb[1] = 3.0f;
 			bp0.temperature = 50.0 + 273.15;
-			bp0.d = m_TH.spacing_r * 1.5;
+			bp0.restDensity = 1000;
+			bp0.d = m_TH.spacing_r * 1;
 			addRigidCuboid(rb, bp0, 0, vis, false, glm::translate(glm::vec3(0, 0, 0)));
+
+			BoundPart bp1; bp1.color[0] = bp1.color[1] = bp1.color[2] = 0.4f; bp1.color[3] = 1;
+			bp1.position = bp1.velocity = bp1.force = vec_t::O;
+			vec_t rb1(1.0f);
+			bp1.temperature = 50.0 + 273.15;
+			bp1.restDensity = 1000;
+			bp1.d = m_TH.spacing_r * 1;
+
+			addRigidCuboid(rb1, bp1, 7000, vis, true, glm::translate(glm::vec3(0, 5, 0)));
 
 			CandidatePart cp0;
 			real_t cp0Density = 800;
@@ -80,23 +90,26 @@ public:
 			fp0.temperature = fp0.temperatureNext = 0 + m_TH.Kelvin;
 			fp0.beta = -0.01 * (fp0.temperature - m_TH.Kelvin) + 1;
 			fp0.beta = 1;
-			fp0.density = 1000 * fp0.beta;
-			fp0.d = m_TH.spacing_r * 1.5;
+			fp0.restDensity = 1000 * fp0.beta;
+			fp0.d = m_TH.spacing_r * 1;
 			fp0.i_color = 1;
-			
-			addFluidCuboid(true, 0, relativeDis_0 + vec_t(-2.0f + m_TH.spacing_r * 2, -3.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),
-				relativeDis_0 + vec_t(2.0f - m_TH.spacing_r * 2, 3.0f + m_TH.spacing_r * 2, 4.0f - m_TH.spacing_r * 2), fp0, fp0.density, 1.0f, 1);
 
-			FluidPart fp1; fp1.velocity = vec_t::O;
-			fp1.temperature = fp1.temperatureNext = 0 + m_TH.Kelvin;
-			fp1.beta = -0.01 * (fp1.temperature - m_TH.Kelvin) + 1;
-			fp1.beta = 0.05;
-			fp1.density = 100 * fp1.beta;
-			fp1.d = m_TH.spacing_r * 1;
-			fp1.i_color = 2;
+			addFluidCuboid(true, 0, relativeDis + vec_t(-4.0f + m_TH.spacing_r * 2, -2.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),
+				relativeDis + vec_t(4.0f - m_TH.spacing_r * 2, 2.0f + m_TH.spacing_r * 2, 4.0f - m_TH.spacing_r * 2), fp0, fp0.restDensity, 0.05f, 1);
 			
-			addFluidCuboid(false, 0, relativeDis_1 + vec_t(-2.0f + m_TH.spacing_r * 2, -3.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),
-				relativeDis_1 + vec_t(2.0f - m_TH.spacing_r * 2, 3.0f + m_TH.spacing_r * 2, 4.0f - m_TH.spacing_r * 2), fp1, fp1.density, 1.0f, 1);
+			/*addFluidCuboid(true, 0, relativeDis_0 + vec_t(-2.0f + m_TH.spacing_r * 2, -3.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),
+				relativeDis_0 + vec_t(2.0f - m_TH.spacing_r * 2, 3.0f + m_TH.spacing_r * 2, 4.0f - m_TH.spacing_r * 2), fp0, fp0.restDensity, 0.05f, 1);*/
+
+			//FluidPart fp1; fp1.velocity = vec_t::O;
+			//fp1.temperature = fp1.temperatureNext = 0 + m_TH.Kelvin;
+			//fp1.beta = -0.01 * (fp1.temperature - m_TH.Kelvin) + 1;
+			//fp1.beta = 0.5;
+			//fp1.restDensity = 1000 * fp1.beta;
+			//fp1.d = m_TH.spacing_r * 1;
+			//fp1.i_color = 2;
+			//
+			//addFluidCuboid(false, 0, relativeDis_1 + vec_t(-2.0f + m_TH.spacing_r * 2, -3.0f + m_TH.spacing_r * 2, -4.0f + m_TH.spacing_r * 2),
+			//	relativeDis_1 + vec_t(2.0f - m_TH.spacing_r * 2, 3.0f + m_TH.spacing_r * 2, 4.0f - m_TH.spacing_r * 2), fp1, fp1.restDensity, 0.05f, 1);
 
 			/*
 			int k = m_Fluids[0].fluidParticles.size() - 1;
